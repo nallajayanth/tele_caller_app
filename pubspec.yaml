@@ -1,0 +1,39 @@
+name: telecaller_mobile_app
+description: "MedTrac Pro - Homeopathy Medicine Distribution Telecaller App"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_riverpod: ^2.6.1
+  hive_flutter: ^1.1.0
+  google_fonts: ^6.2.1
+  flutter_animate: ^4.5.0
+  intl: ^0.20.2
+  csv: ^6.0.0
+  share_plus: ^9.0.0
+  path_provider: ^2.1.5
+  uuid: ^4.5.1
+  supabase_flutter: ^2.12.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  flutter_launcher_icons: ^0.13.1
+
+flutter_launcher_icons:
+  android: "launcher_icon"
+  ios: true
+  image_path: "assets/logo.jpg"
+  remove_alpha_ios: true
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo.jpg
