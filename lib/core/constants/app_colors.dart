@@ -75,6 +75,8 @@ class AppColors {
     switch (status.toLowerCase()) {
       case 'connected':
         return connected;
+      case 'order received':
+        return const Color(0xFF0D9488);
       case 'busy':
         return busy;
       case 'no answer':

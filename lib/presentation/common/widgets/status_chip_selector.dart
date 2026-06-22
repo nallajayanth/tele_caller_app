@@ -17,6 +17,7 @@ class StatusOption {
 
 const kStatusOptions = [
   StatusOption(label: 'Connected', icon: Icons.check_circle_rounded, color: AppColors.connected),
+  StatusOption(label: 'Order Received', icon: Icons.shopping_bag_rounded, color: Color(0xFF0D9488)),
   StatusOption(label: 'Busy', icon: Icons.phone_in_talk_rounded, color: AppColors.busy),
   StatusOption(label: 'No Answer', icon: Icons.phone_missed_rounded, color: AppColors.noAnswer),
   StatusOption(label: 'Call Back', icon: Icons.phone_callback_rounded, color: AppColors.callBack),

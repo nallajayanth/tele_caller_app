@@ -6,6 +6,7 @@ import 'providers/auth_providers.dart';
 import 'presentation/auth/login_screen.dart';
 import 'presentation/admin/admin_terminal.dart';
 import 'presentation/staff/staff_dashboard.dart';
+import 'presentation/warehouse/warehouse_dashboard.dart';
 
 class TelecallerApp extends ConsumerWidget {
   const TelecallerApp({super.key});
@@ -25,7 +26,9 @@ class TelecallerApp extends ConsumerWidget {
           ? const LoginScreen()
           : (activeUser.role == 'admin'
               ? const AdminTerminal()
-              : const StaffDashboard()),
+              : (activeUser.role == 'warehouse'
+                  ? const WarehouseDashboard()
+                  : const StaffDashboard())),
     );
   }
 }

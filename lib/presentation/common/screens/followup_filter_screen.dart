@@ -13,6 +13,9 @@ import '../../../providers/theme_provider.dart';
 import '../../admin/views/admin_edit_modal.dart';
 import '../../admin/widgets/admin_log_card.dart';
 import '../../common/widgets/success_toast.dart';
+import '../../../data/models/order_model.dart';
+import '../../common/widgets/multi_image_viewer.dart';
+
 
 class FollowUpFilterScreen extends ConsumerStatefulWidget {
   final bool isAdmin;
@@ -251,30 +254,45 @@ class _FollowUpFilterScreenState extends ConsumerState<FollowUpFilterScreen> {
 
           // ── Log list ─────────────────────────────────────────────────
           Expanded(
-            child: logs.isEmpty
-                ? _EmptyState(
-                    date: selectedDate,
-                    isToday: isToday,
-                    onGoToday: _goToToday,
-                  )
-                : ListView.builder(
-                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
-                    itemCount: logs.length,
-                    itemBuilder: (ctx, i) {
-                      final log = logs[i];
-                      if (widget.isAdmin) {
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: 10),
-                          child: _AdminSwipeCard(
-                            key: ValueKey(log.id),
-                            log: log,
-                            index: i,
+            child: RefreshIndicator(
+              color: AppColors.primary,
+              onRefresh: () async {
+                await ref.read(callLogsProvider.notifier).loadLogs();
+              },
+              child: logs.isEmpty
+                  ? ListView(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      children: [
+                        SizedBox(
+                          height: MediaQuery.of(context).size.height - 300,
+                          child: _EmptyState(
+                            date: selectedDate,
+                            isToday: isToday,
+                            onGoToday: _goToToday,
                           ),
-                        );
-                      }
-                      return _ReadOnlyCard(log: log, index: i);
-                    },
-                  ),
+                        ),
+                      ],
+                    )
+                  : ListView.builder(
+                      physics: const AlwaysScrollableScrollPhysics(),
+                      padding: const EdgeInsets.fromLTRB(16, 0, 16, 32),
+                      itemCount: logs.length,
+                      itemBuilder: (ctx, i) {
+                        final log = logs[i];
+                        if (widget.isAdmin) {
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 10),
+                            child: _AdminSwipeCard(
+                              key: ValueKey(log.id),
+                              log: log,
+                              index: i,
+                            ),
+                          );
+                        }
+                        return _ReadOnlyCard(log: log, index: i);
+                      },
+                    ),
+            ),
           ),
         ],
       ),
@@ -436,18 +454,19 @@ class _AdminSwipeCard extends ConsumerWidget {
 
 // ── Read-only card for staff ─────────────────────────────────────────────
 
-class _ReadOnlyCard extends StatefulWidget {
+class _ReadOnlyCard extends ConsumerStatefulWidget {
   final CallLogModel log;
   final int index;
 
   const _ReadOnlyCard({required this.log, required this.index});
 
   @override
-  State<_ReadOnlyCard> createState() => _ReadOnlyCardState();
+  ConsumerState<_ReadOnlyCard> createState() => _ReadOnlyCardState();
 }
 
-class _ReadOnlyCardState extends State<_ReadOnlyCard> {
+class _ReadOnlyCardState extends ConsumerState<_ReadOnlyCard> {
   bool _expanded = false;
+
 
   @override
   Widget build(BuildContext context) {
@@ -455,6 +474,11 @@ class _ReadOnlyCardState extends State<_ReadOnlyCard> {
     final log = widget.log;
     final statusColor = AppColors.statusColor(log.connectedStatus);
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
+
+    // Check order detail if status is order received
+    final OrderModel? orderDetail = log.connectedStatus == 'Order Received'
+        ? ref.watch(orderDetailProvider(log.id))
+        : null;
 
     return GestureDetector(
       onTap: () => setState(() => _expanded = !_expanded),
@@ -550,6 +574,13 @@ class _ReadOnlyCardState extends State<_ReadOnlyCard> {
                 children: [
                   _StatusPill(label: log.connectedStatus, color: statusColor),
                   const SizedBox(width: 6),
+                  if (log.connectedStatus == 'Order Received') ...[
+                    _StatusPill(
+                      label: '📦 ${(orderDetail?.status ?? 'received').toUpperCase()}',
+                      color: _orderStatusColor(orderDetail?.status ?? 'received'),
+                    ),
+                    const SizedBox(width: 6),
+                  ],
                   if (log.product.isNotEmpty)
                     Expanded(
                       child: _StatusPill(
@@ -587,11 +618,107 @@ class _ReadOnlyCardState extends State<_ReadOnlyCard> {
                                 value: log.customerResponse),
                             const SizedBox(height: 8),
                           ],
-                          if (log.remarks.isNotEmpty)
+                          if (log.remarks.isNotEmpty) ...[
                             _DetailRow(
                                 icon: Icons.edit_note_rounded,
                                 label: 'Remarks',
                                 value: log.remarks),
+                            const SizedBox(height: 8),
+                          ],
+                          if (log.connectedStatus == 'Order Received') ...[
+                            _DetailRow(
+                              icon: Icons.payments_rounded,
+                              label: 'Financials',
+                              value: 'Received: ₹${log.amountReceived.toStringAsFixed(2)}  |  Due: ₹${log.amountDue.toStringAsFixed(2)}',
+                            ),
+                            const SizedBox(height: 10),
+                            if (orderDetail != null)
+                              Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Divider(color: isDark ? AppColors.borderDark : AppColors.border, height: 16),
+                                  Text(
+                                    'Warehouse Shipment Details',
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.primary,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  _DetailRow(
+                                    icon: Icons.info_outline_rounded,
+                                    label: 'Current Status',
+                                    value: orderDetail.status.toUpperCase(),
+                                  ),
+                                  const SizedBox(height: 10),
+                                  if (orderDetail.status == 'packed' || orderDetail.status == 'dispatched') ...[
+                                    if (orderDetail.packedPhotoUrls.isNotEmpty) ...[
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.photo_rounded, size: 14, color: AppColors.primary),
+                                          const SizedBox(width: 8),
+                                          GestureDetector(
+                                            onTap: () => MultiImageViewerDialog.show(
+                                                context,
+                                                imageUrls: orderDetail.packedPhotoUrls,
+                                                title: 'Packed Verification Photos'),
+                                            child: Text(
+                                              'View Packed Bag Photo (${orderDetail.packedPhotoUrls.length}) 🖼️',
+                                              style: GoogleFonts.plusJakartaSans(
+                                                fontSize: 13,
+                                                color: AppColors.primaryLight,
+                                                fontWeight: FontWeight.w600,
+                                                decoration: TextDecoration.underline,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                    ],
+                                  ],
+                                  if (orderDetail.status == 'dispatched') ...[
+                                    _DetailRow(
+                                      icon: Icons.local_shipping_rounded,
+                                      label: 'Logistics Provider',
+                                      value: orderDetail.logisticsProvider ?? 'N/A',
+                                    ),
+                                    const SizedBox(height: 10),
+                                    _DetailRow(
+                                      icon: Icons.tag_rounded,
+                                      label: 'Tracking ID',
+                                      value: orderDetail.trackingId ?? 'N/A',
+                                    ),
+                                    const SizedBox(height: 10),
+                                    if (orderDetail.dispatchedPhotoUrls.isNotEmpty) ...[
+                                      Row(
+                                        children: [
+                                          const Icon(Icons.photo_rounded, size: 14, color: AppColors.primary),
+                                          const SizedBox(width: 8),
+                                          GestureDetector(
+                                            onTap: () => MultiImageViewerDialog.show(
+                                                context,
+                                                imageUrls: orderDetail.dispatchedPhotoUrls,
+                                                title: 'Logistics Slip Photos'),
+                                            child: Text(
+                                              'View Tracking Slip Photo (${orderDetail.dispatchedPhotoUrls.length}) 🖼️',
+                                              style: GoogleFonts.plusJakartaSans(
+                                                fontSize: 13,
+                                                color: AppColors.primaryLight,
+                                                fontWeight: FontWeight.w600,
+                                                decoration: TextDecoration.underline,
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      const SizedBox(height: 10),
+                                    ],
+                                  ],
+                                ],
+                              ),
+                          ],
                         ],
                       ),
                     )
@@ -614,6 +741,19 @@ class _ReadOnlyCardState extends State<_ReadOnlyCard> {
       case 'not interested': return Icons.thumb_down_rounded;
       case 'interested':  return Icons.thumb_up_rounded;
       default:            return Icons.phone_rounded;
+    }
+  }
+
+  Color _orderStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'received':
+        return const Color(0xFF3B82F6); // Blue
+      case 'packed':
+        return const Color(0xFFF59E0B); // Orange
+      case 'dispatched':
+        return const Color(0xFF10B981); // Green
+      default:
+        return const Color(0xFF6B7280);
     }
   }
 

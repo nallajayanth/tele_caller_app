@@ -8,6 +8,7 @@ import '../../core/constants/app_spacing.dart';
 import '../../providers/call_log_providers.dart';
 import '../admin/admin_terminal.dart';
 import '../staff/staff_dashboard.dart';
+import '../warehouse/warehouse_dashboard.dart';
 
 class RoleSelectorScreen extends StatelessWidget {
   const RoleSelectorScreen({super.key});
@@ -63,37 +64,45 @@ class RoleSelectorScreen extends StatelessWidget {
                       ),
                     ).animate().fadeIn(delay: 350.ms),
                     const SizedBox(height: 20),
-                    Row(
+                    Column(
                       children: [
-                        Expanded(
-                          child: _RoleCard(
-                            title: 'Staff\nConsole',
-                            subtitle: 'Log your daily\ncall activity',
-                            icon: Icons.headset_mic_rounded,
-                            gradientColors: [
-                              const Color(0xFF00857A),
-                              const Color(0xFF005F54),
-                            ],
-                            delay: 450,
-                            onTap: () => _navigate(context, const StaffDashboard()),
-                          ),
+                        _RoleCard(
+                          title: 'Staff Console',
+                          subtitle: 'Log your daily call activity',
+                          icon: Icons.headset_mic_rounded,
+                          gradientColors: [
+                            const Color(0xFF00857A),
+                            const Color(0xFF005F54),
+                          ],
+                          delay: 450,
+                          onTap: () => _navigate(context, const StaffDashboard()),
                         ),
-                        const SizedBox(width: 16),
-                        Expanded(
-                          child: _RoleCard(
-                            title: 'Admin\nTerminal',
-                            subtitle: 'Full business\ncontrol center',
-                            icon: Icons.shield_rounded,
-                            gradientColors: [
-                              const Color(0xFFD97706),
-                              const Color(0xFFB45309),
-                            ],
-                            delay: 550,
-                            onTap: () => _showPinDialog(context),
-                          ),
+                        const SizedBox(height: 12),
+                        _RoleCard(
+                          title: 'Warehouse Console',
+                          subtitle: 'Fulfil & dispatch orders',
+                          icon: Icons.inventory_rounded,
+                          gradientColors: [
+                            const Color(0xFF3B82F6),
+                            const Color(0xFF1E3A8A),
+                          ],
+                          delay: 500,
+                          onTap: () => _navigate(context, const WarehouseDashboard()),
+                        ),
+                        const SizedBox(height: 12),
+                        _RoleCard(
+                          title: 'Admin Terminal',
+                          subtitle: 'Full business control center',
+                          icon: Icons.shield_rounded,
+                          gradientColors: [
+                            const Color(0xFFD97706),
+                            const Color(0xFFB45309),
+                          ],
+                          delay: 550,
+                          onTap: () => _showPinDialog(context),
                         ),
                       ],
-                    ).animate().fadeIn(delay: 400.ms).slideY(begin: 0.3),
+                    ).animate().fadeIn(delay: 400.ms).slideY(begin: 0.2),
                     const Spacer(),
                     Text(
                       'HT TELECALING  •  v1.0.0',
@@ -272,7 +281,7 @@ class _RoleCardState extends State<_RoleCard>
           child: BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
             child: Container(
-              height: 200,
+              height: 90,
               decoration: BoxDecoration(
                 color: Colors.white.withValues(alpha: 0.07),
                 borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
@@ -284,8 +293,8 @@ class _RoleCardState extends State<_RoleCard>
               child: Stack(
                 children: [
                   Positioned(
-                    top: -20,
-                    right: -20,
+                    top: -25,
+                    right: -25,
                     child: Container(
                       width: 90,
                       height: 90,
@@ -297,40 +306,47 @@ class _RoleCardState extends State<_RoleCard>
                         .fadeIn(duration: 600.ms),
                   ),
                   Padding(
-                    padding: const EdgeInsets.all(20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisAlignment: MainAxisAlignment.end,
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    child: Row(
                       children: [
                         Container(
-                          width: 46,
-                          height: 46,
+                          width: 48,
+                          height: 48,
                           decoration: BoxDecoration(
                             gradient: LinearGradient(colors: widget.gradientColors),
                             borderRadius: BorderRadius.circular(14),
                           ),
                           child: Icon(widget.icon, color: Colors.white, size: 24),
                         ),
-                        const SizedBox(height: 16),
-                        Text(
-                          widget.title,
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                            color: Colors.white,
-                            height: 1.2,
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              Text(
+                                widget.title,
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w800,
+                                  color: Colors.white,
+                                  height: 1.2,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                widget.subtitle,
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.w400,
+                                  color: Colors.white.withValues(alpha: 0.55),
+                                  height: 1.3,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 6),
-                        Text(
-                          widget.subtitle,
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w400,
-                            color: Colors.white.withValues(alpha: 0.55),
-                            height: 1.4,
-                          ),
-                        ),
+                        const Icon(Icons.chevron_right_rounded, color: Colors.white30, size: 28),
                       ],
                     ),
                   ),

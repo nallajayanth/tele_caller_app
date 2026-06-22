@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,7 +7,9 @@ import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../data/models/call_log_model.dart';
+import '../../../data/models/product_model.dart';
 import '../../../providers/call_log_providers.dart';
+import '../../../providers/product_providers.dart';
 import '../../common/widgets/premium_button.dart';
 import '../../common/widgets/status_chip_selector.dart';
 import '../../common/widgets/success_toast.dart';
@@ -34,6 +37,25 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
   late DateTime _followUpDate;
   bool _isSaving = false;
 
+  Map<String, int> _selectedProductQuantities = {};
+  String? _selectedDropdownProduct;
+  bool _showCustomProductField = false;
+
+  String _formatProductText(String product) {
+    try {
+      final list = jsonDecode(product) as List;
+      if (list.isEmpty) return '';
+      final formattedItems = list.map((item) {
+        final name = item['name'] as String? ?? '';
+        final qty = item['qty'] ?? 1;
+        return '$name × $qty';
+      }).toList();
+      return formattedItems.join(', ');
+    } catch (_) {
+      return product;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -41,7 +63,7 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
     _nameCtrl = TextEditingController(text: log.customerName);
     _mobileCtrl = TextEditingController(text: log.mobile);
     _placeCtrl = TextEditingController(text: log.place);
-    _productCtrl = TextEditingController(text: log.product);
+    _productCtrl = TextEditingController(text: _formatProductText(log.product));
     _responseCtrl = TextEditingController(text: log.customerResponse);
     _remarksCtrl = TextEditingController(text: log.remarks);
     _orderCtrl =
@@ -49,6 +71,39 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
     _selectedStatus =
         log.connectedStatus.isEmpty ? null : log.connectedStatus;
     _followUpDate = log.nextFollowUpDate;
+
+    bool parsedJson = false;
+    if (log.product.trim().startsWith('[') && log.product.trim().endsWith(']')) {
+      try {
+        final decoded = jsonDecode(log.product);
+        if (decoded is List) {
+          for (var item in decoded) {
+            if (item is Map) {
+              final id = item['id']?.toString() ?? '';
+              final qtyVal = item['qty'];
+              final qty = qtyVal is num ? qtyVal.toInt() : (int.tryParse(qtyVal?.toString() ?? '') ?? 0);
+              if (id.isNotEmpty && qty > 0) {
+                _selectedProductQuantities[id] = qty;
+              }
+            }
+          }
+          parsedJson = true;
+        }
+      } catch (_) {}
+    }
+
+    if (log.product.isNotEmpty) {
+      if (parsedJson) {
+        _selectedDropdownProduct = '__custom__';
+        _showCustomProductField = true;
+      } else {
+        _selectedDropdownProduct = null;
+        _showCustomProductField = false;
+      }
+    } else {
+      _showCustomProductField = false;
+      _selectedDropdownProduct = null;
+    }
   }
 
   @override
@@ -83,6 +138,14 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
 
   Future<void> _save() async {
     if (!_formKey.currentState!.validate()) return;
+
+    if (_selectedStatus == 'Order Received' && _selectedProductQuantities.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Please select at least one product with quantity > 0!')),
+      );
+      return;
+    }
+
     setState(() => _isSaving = true);
 
     final updated = widget.log.copyWith(
@@ -127,13 +190,28 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final products = ref.watch(productsProvider).valueOrNull ?? [];
 
-    return DraggableScrollableSheet(
-      initialChildSize: 0.92,
-      minChildSize: 0.5,
-      maxChildSize: 0.97,
-      expand: false,
-      builder: (_, scrollCtrl) => Container(
+    // Auto-resolve single product selection if not already resolved and not JSON
+    if (_selectedDropdownProduct == null && _selectedProductQuantities.isEmpty && widget.log.product.isNotEmpty) {
+      final matches = products.any((p) => p.name == widget.log.product);
+      if (matches) {
+        _selectedDropdownProduct = widget.log.product;
+        _showCustomProductField = false;
+      } else {
+        _selectedDropdownProduct = '__custom__';
+        _showCustomProductField = true;
+      }
+    }
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: DraggableScrollableSheet(
+        initialChildSize: 0.92,
+        minChildSize: 0.5,
+        maxChildSize: 0.97,
+        expand: false,
+        builder: (_, scrollCtrl) => Container(
         decoration: BoxDecoration(
           color: isDark ? AppColors.darkBackground : AppColors.lightBackground,
           borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
@@ -221,8 +299,6 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
                     ),
                     const SizedBox(height: 12),
                     _EditField(ctrl: _placeCtrl, label: 'Place', icon: Icons.location_on_rounded),
-                    const SizedBox(height: 12),
-                    _EditField(ctrl: _productCtrl, label: 'Product / Remedy', icon: Icons.medication_rounded),
                     const SizedBox(height: 16),
                     Text(
                       'CALL STATUS',
@@ -236,8 +312,17 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
                     const SizedBox(height: 10),
                     StatusChipSelector(
                       selected: _selectedStatus,
-                      onChanged: (s) => setState(() => _selectedStatus = s),
+                      onChanged: (s) => setState(() {
+                        _selectedStatus = s;
+                        _selectedDropdownProduct = null;
+                        _showCustomProductField = false;
+                        _selectedProductQuantities = {};
+                        _productCtrl.clear();
+                        _orderCtrl.text = '0';
+                      }),
                     ),
+                    const SizedBox(height: 16),
+                    _buildProductSelector(context, isDark, products, isDark ? AppColors.darkSurface : Colors.white),
                     const SizedBox(height: 16),
                     _EditField(
                       ctrl: _responseCtrl,
@@ -338,7 +423,152 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
           ),
         ),
       ),
-    );
+    ),
+  );
+}
+
+  Widget _buildProductSelector(BuildContext context, bool isDark, List<ProductModel> products, Color cardColor) {
+    if (_selectedStatus == 'Order Received') {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Select Products & Quantities *',
+            style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary),
+          ),
+          const SizedBox(height: 10),
+          if (products.isEmpty)
+            Text(
+              'No products configured. Contact admin.',
+              style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppColors.error),
+            )
+          else
+            ...products.map((p) {
+              final qty = _selectedProductQuantities[p.id] ?? 0;
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            p.name,
+                            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 14),
+                          ),
+                          Text(
+                            'Price: ₹${p.price.toStringAsFixed(0)}',
+                            style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppColors.textTertiary),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Row(
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.remove_circle_outline_rounded, color: AppColors.primary, size: 20),
+                          onPressed: qty > 0
+                              ? () {
+                                  setState(() {
+                                    final newQty = qty - 1;
+                                    if (newQty == 0) {
+                                      _selectedProductQuantities.remove(p.id);
+                                    } else {
+                                      _selectedProductQuantities[p.id] = newQty;
+                                    }
+                                    _recalculateOrderFromProducts(products);
+                                  });
+                                }
+                              : null,
+                        ),
+                        Text(
+                          '$qty',
+                          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.add_circle_outline_rounded, color: AppColors.primary, size: 20),
+                          onPressed: () {
+                            setState(() {
+                              _selectedProductQuantities[p.id] = qty + 1;
+                              _recalculateOrderFromProducts(products);
+                            });
+                          },
+                        ),
+                      ],
+                    ),
+                  ],
+                ),
+              );
+            }),
+        ],
+      );
+    } else {
+      return Column(
+        children: [
+          DropdownButtonFormField<String>(
+            initialValue: _selectedDropdownProduct,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Select Product / Remedy *',
+              prefixIcon: Icon(Icons.science_rounded),
+            ),
+            items: [
+              ...products.map((p) => DropdownMenuItem(value: p.name, child: Text(p.name))),
+              const DropdownMenuItem(value: '__custom__', child: Text('Other / Custom...')),
+            ],
+            onChanged: (val) {
+              setState(() {
+                _selectedDropdownProduct = val;
+                if (val == '__custom__') {
+                  _showCustomProductField = true;
+                  _productCtrl.clear();
+                } else {
+                  _showCustomProductField = false;
+                  _productCtrl.text = val ?? '';
+                }
+              });
+            },
+            validator: (v) => v == null ? 'Required' : null,
+          ),
+          if (_showCustomProductField) ...[
+            const SizedBox(height: 12),
+            _EditField(
+              ctrl: _productCtrl,
+              label: 'Custom Product Name *',
+              icon: Icons.edit_note_rounded,
+              validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
+            ),
+          ],
+        ],
+      );
+    }
+  }
+
+  void _recalculateOrderFromProducts(List<ProductModel> products) {
+    try {
+      double total = 0;
+      final List<Map<String, dynamic>> selectedItems = [];
+
+      _selectedProductQuantities.forEach((prodId, qty) {
+        final p = products.firstWhere(
+          (prod) => prod.id == prodId,
+          orElse: () => ProductModel(id: prodId, name: 'Unknown', price: 0.0, stock: 0),
+        );
+        total += p.price * qty;
+        selectedItems.add({
+          'id': p.id,
+          'name': p.name,
+          'price': p.price,
+          'qty': qty,
+        });
+      });
+
+      _orderCtrl.text = total.toStringAsFixed(0);
+      _productCtrl.text = selectedItems.isEmpty ? '' : jsonEncode(selectedItems);
+    } catch (e, stack) {
+      debugPrint('Error recalculating order value: $e\n$stack');
+    }
   }
 }
 

@@ -14,13 +14,20 @@ import '../../data/models/call_log_model.dart';
 import '../../providers/call_log_providers.dart';
 import '../../providers/deleted_log_providers.dart';
 import '../../providers/theme_provider.dart';
+import '../../providers/order_providers.dart';
 import '../../providers/auth_providers.dart';
 import '../common/screens/followup_filter_screen.dart';
 import '../common/widgets/success_toast.dart';
 import 'screens/bin_screen.dart';
+import 'screens/target_management_screen.dart';
+import 'screens/sales_analytics_screen.dart';
+import 'screens/employee_monitoring_screen.dart';
+import 'screens/user_management_screen.dart';
+import 'screens/product_management_screen.dart';
 import 'views/admin_edit_modal.dart';
 import 'widgets/admin_log_card.dart';
 import 'widgets/metric_tile.dart';
+import 'package:hive_flutter/hive_flutter.dart';
 
 class AdminTerminal extends ConsumerStatefulWidget {
   const AdminTerminal({super.key});
@@ -32,12 +39,14 @@ class AdminTerminal extends ConsumerStatefulWidget {
 class _AdminTerminalState extends ConsumerState<AdminTerminal> {
   final _searchCtrl = TextEditingController();
   final _pageCtrl = PageController();
+  final _scrollCtrl = ScrollController();
   int _metricPage = 0;
 
   @override
   void dispose() {
     _searchCtrl.dispose();
     _pageCtrl.dispose();
+    _scrollCtrl.dispose();
     super.dispose();
   }
 
@@ -153,6 +162,40 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
     }
   }
 
+  void _onPipelineCardTapped(String type) {
+    HapticFeedback.mediumImpact();
+    final currentFilter = ref.read(logFilterProvider);
+    final isSelected = currentFilter.orderStatusFilter == type;
+
+    ref.read(logFilterProvider.notifier).update((s) => s.copyWith(
+          orderStatusFilter: isSelected ? null : type,
+          clearStatus: true, // clear other filters to focus on orders
+          clearOrderStatus: isSelected, // clear if de-selected
+        ));
+
+    if (!isSelected) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollCtrl.hasClients) {
+          _scrollCtrl.animateTo(
+            480.0, // scroll offset down to filtered logs list
+            duration: const Duration(milliseconds: 400),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      });
+    } else {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (_scrollCtrl.hasClients) {
+          _scrollCtrl.animateTo(
+            0.0,
+            duration: const Duration(milliseconds: 300),
+            curve: Curves.easeOutCubic,
+          );
+        }
+      });
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
@@ -160,16 +203,10 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
     final filter = ref.watch(logFilterProvider);
     final filteredLogs = ref.watch(filteredLogsProvider);
     final binCount = ref.watch(deletedLogProvider).length;
+    final dailyStats = ref.watch(globalOrderStatsProvider);
 
     final logsAsync = ref.watch(callLogsProvider);
-    final logs = logsAsync.value ?? [];
-    final now = DateTime.now();
-    final todayLogs = logs.where((l) =>
-        l.date.year == now.year &&
-        l.date.month == now.month &&
-        l.date.day == now.day).toList();
-    final staff1Count = todayLogs.where((l) => l.deviceId.contains('8019176176')).length;
-    final staff2Count = todayLogs.where((l) => l.deviceId.contains('9698176176')).length;
+    final logs = (logsAsync.value ?? []).where((l) => l.connectedStatus != '__system_config__').toList();
 
     final selectedDate = filter.dateFilter;
     final dateLogs = selectedDate == null 
@@ -291,8 +328,14 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
           const SizedBox(width: 4),
         ],
       ),
-      body: CustomScrollView(
-        slivers: [
+      body: RefreshIndicator(
+        color: AppColors.primary,
+        onRefresh: () async {
+          await ref.read(callLogsProvider.notifier).loadLogs();
+        },
+        child: CustomScrollView(
+          controller: _scrollCtrl,
+          slivers: [
           SliverToBoxAdapter(
             child: Column(
               children: [
@@ -364,51 +407,79 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
                   ),
                 ),
 
-                // Staff performance today cards
+                // Admin control panel tools grid
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Row(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(
-                        child: _StaffPerformanceCard(
-                          name: '8019',
-                          phone: '8019176176',
-                          count: staff1Count,
-                          isActive: filter.staffFilter == '8019',
-                          onTap: () {
-                            HapticFeedback.mediumImpact();
-                            final isSelected = filter.staffFilter == '8019';
-                            ref.read(logFilterProvider.notifier).update(
-                                  (s) => s.copyWith(
-                                    staffFilter: isSelected ? null : '8019',
-                                    clearStaff: isSelected,
-                                  ),
-                                );
-                          },
+                      Text(
+                        'ADMIN CONTROL PANEL',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.primary,
+                          letterSpacing: 1.0,
                         ),
                       ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: _StaffPerformanceCard(
-                          name: '9698',
-                          phone: '9698176176',
-                          count: staff2Count,
-                          isActive: filter.staffFilter == '9698',
-                          onTap: () {
-                            HapticFeedback.mediumImpact();
-                            final isSelected = filter.staffFilter == '9698';
-                            ref.read(logFilterProvider.notifier).update(
-                                  (s) => s.copyWith(
-                                    staffFilter: isSelected ? null : '9698',
-                                    clearStaff: isSelected,
-                                  ),
-                                );
-                          },
+                      const SizedBox(height: 10),
+                      SizedBox(
+                        height: 72,
+                        child: ListView(
+                          scrollDirection: Axis.horizontal,
+                          children: [
+                            _AdminToolBtn(
+                              label: 'Targets',
+                              icon: Icons.track_changes_rounded,
+                              color: const Color(0xFF3B82F6),
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const TargetManagementScreen()),
+                              ),
+                            ),
+                            _AdminToolBtn(
+                              label: 'Analytics',
+                              icon: Icons.bar_chart_rounded,
+                              color: AppColors.accent,
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const SalesAnalyticsScreen()),
+                              ),
+                            ),
+                            _AdminToolBtn(
+                              label: 'Monitoring',
+                              icon: Icons.people_rounded,
+                              color: const Color(0xFF8B5CF6),
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const EmployeeMonitoringScreen()),
+                              ),
+                            ),
+                            _AdminToolBtn(
+                              label: 'Employees',
+                              icon: Icons.manage_accounts_rounded,
+                              color: AppColors.primary,
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const UserManagementScreen()),
+                              ),
+                            ),
+                            _AdminToolBtn(
+                              label: 'Products',
+                              icon: Icons.inventory_2_rounded,
+                              color: const Color(0xFF10B981),
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const ProductManagementScreen()),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     ],
                   ),
                 ),
+
+                // Today's Order Pipeline Stats Dashboard
+                _buildDailyOrderStats(context, isDark, dailyStats, filter),
+
+                // Weekly Cleanliness Reminder Card
+                _buildCleanlinessCard(context, isDark),
 
                 // Date-wise Summary Card
                 Padding(
@@ -767,6 +838,7 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
             ),
         ],
       ),
+    ),
     );
   }
 
@@ -776,7 +848,325 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
     if (v >= 1000) return '₹${(v / 1000).toStringAsFixed(1)}K';
     return '₹${v.toStringAsFixed(0)}';
   }
+
+  Widget _buildCleanlinessCard(BuildContext context, bool isDark) {
+    final box = Hive.box('settings');
+    final lastMaintenanceStr = box.get('last_maintenance_date');
+    DateTime? lastMaintenance;
+    if (lastMaintenanceStr != null) {
+      lastMaintenance = DateTime.parse(lastMaintenanceStr as String);
+    }
+
+    final now = DateTime.now();
+    final isSunday = now.weekday == DateTime.sunday;
+    final hasDoneToday = lastMaintenance != null &&
+        lastMaintenance.year == now.year &&
+        lastMaintenance.month == now.month &&
+        lastMaintenance.day == now.day;
+
+    final bg = isDark ? AppColors.darkSurface : Colors.white;
+
+    if (isSunday && !hasDoneToday) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.error.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: AppColors.error.withValues(alpha: 0.4), width: 1.5),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(color: AppColors.error, shape: BoxShape.circle),
+                child: const Icon(Icons.cleaning_services_rounded, color: Colors.white, size: 20),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'WEEKLY WAREHOUSE CLEANLINESS DUE',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 10,
+                        fontWeight: FontWeight.w800,
+                        color: AppColors.error,
+                      ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      'Sunday clean-up and warehouse audit is required.',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white70 : AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  HapticFeedback.heavyImpact();
+                  await box.put('last_maintenance_date', DateTime.now().toIso8601String());
+                  setState(() {});
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppColors.error,
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                ),
+                child: const Text('Mark Done'),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: isDark ? AppColors.borderDark : AppColors.border),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: AppColors.success.withValues(alpha: 0.1),
+                shape: BoxShape.circle,
+              ),
+              child: const Icon(Icons.cleaning_services_rounded, color: AppColors.success, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'WAREHOUSE MAINTENANCE',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 10,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.success,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    hasDoneToday
+                        ? 'Warehouse cleanliness verified for today!'
+                        : 'Warehouse cleanliness: Next audit scheduled for Sunday.',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w500,
+                      color: isDark ? Colors.white70 : AppColors.textPrimary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildDailyOrderStats(BuildContext context, bool isDark, DailyOrderStats stats, LogFilterState filter) {
+    final cardColor = isDark ? AppColors.darkSurface : Colors.white;
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'TODAY\'S ORDER PIPELINE',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 10,
+              fontWeight: FontWeight.w800,
+              color: AppColors.primary,
+              letterSpacing: 1.0,
+            ),
+          ),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            physics: const BouncingScrollPhysics(),
+            clipBehavior: Clip.none,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 88,
+                  child: _OrderStatCard(
+                    label: 'New Today',
+                    value: stats.newOrdersToday.toString(),
+                    color: const Color(0xFF3B82F6),
+                    icon: Icons.new_releases_rounded,
+                    isDark: isDark,
+                    cardColor: cardColor,
+                    isSelected: filter.orderStatusFilter == 'new_today',
+                    onTap: () => _onPipelineCardTapped('new_today'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 88,
+                  child: _OrderStatCard(
+                    label: 'Pending',
+                    value: stats.pendingDispatch.toString(),
+                    color: const Color(0xFFF59E0B),
+                    icon: Icons.pending_actions_rounded,
+                    isDark: isDark,
+                    cardColor: cardColor,
+                    isSelected: filter.orderStatusFilter == 'pending',
+                    onTap: () => _onPipelineCardTapped('pending'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 88,
+                  child: _OrderStatCard(
+                    label: 'Packed',
+                    value: stats.packedToday.toString(),
+                    color: const Color(0xFF8B5CF6),
+                    icon: Icons.inventory_2_rounded,
+                    isDark: isDark,
+                    cardColor: cardColor,
+                    isSelected: filter.orderStatusFilter == 'packed_today',
+                    onTap: () => _onPipelineCardTapped('packed_today'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 88,
+                  child: _OrderStatCard(
+                    label: 'Dispatched',
+                    value: stats.dispatchedToday.toString(),
+                    color: const Color(0xFF10B981),
+                    icon: Icons.local_shipping_rounded,
+                    isDark: isDark,
+                    cardColor: cardColor,
+                    isSelected: filter.orderStatusFilter == 'dispatched_today',
+                    onTap: () => _onPipelineCardTapped('dispatched_today'),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                SizedBox(
+                  width: 88,
+                  child: _OrderStatCard(
+                    label: 'Exceeded 24h',
+                    value: stats.exceeded24h.toString(),
+                    color: AppColors.error,
+                    icon: Icons.warning_amber_rounded,
+                    isDark: isDark,
+                    cardColor: cardColor,
+                    isSelected: filter.orderStatusFilter == 'exceeded_24h',
+                    onTap: () => _onPipelineCardTapped('exceeded_24h'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
+
+class _OrderStatCard extends StatelessWidget {
+  final String label;
+  final String value;
+  final Color color;
+  final IconData icon;
+  final bool isDark;
+  final Color cardColor;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _OrderStatCard({
+    required this.label,
+    required this.value,
+    required this.color,
+    required this.icon,
+    required this.isDark,
+    required this.cardColor,
+    this.isSelected = false,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 250),
+        curve: Curves.easeInOut,
+        padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: isSelected
+                ? color
+                : (isDark ? AppColors.borderDark : AppColors.border),
+            width: isSelected ? 2.0 : 1.0,
+          ),
+          boxShadow: isSelected
+              ? AppShadows.primaryGlow(color)
+              : [
+                  BoxShadow(
+                    color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.04),
+                    blurRadius: 4,
+                    offset: const Offset(0, 2),
+                  ),
+                ],
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.12),
+                shape: BoxShape.circle,
+              ),
+              child: Icon(icon, color: color, size: 16),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              value,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 16,
+                fontWeight: FontWeight.w800,
+                color: isDark ? Colors.white : AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              label,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 8,
+                fontWeight: FontWeight.w700,
+                color: AppColors.textTertiary,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    ).animate(target: isSelected ? 1.0 : 0.0)
+     .scale(begin: const Offset(1.0, 1.0), end: const Offset(1.05, 1.05), duration: 150.ms);
+  }
+}
+
 
 class _SwipeableLogCard extends ConsumerWidget {
   final CallLogModel log;
@@ -1022,117 +1412,53 @@ class _EmptyFiltered extends StatelessWidget {
   }
 }
 
-class _StaffPerformanceCard extends StatelessWidget {
-  final String name;
-  final String phone;
-  final int count;
-  final bool isActive;
+
+
+class _AdminToolBtn extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final Color color;
   final VoidCallback onTap;
 
-  const _StaffPerformanceCard({
-    required this.name,
-    required this.phone,
-    required this.count,
-    required this.isActive,
+  const _AdminToolBtn({
+    required this.label,
+    required this.icon,
+    required this.color,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor = name == '8019' ? const Color(0xFF00857A) : const Color(0xFFD97706);
-    
     return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 250),
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      onTap: () {
+        HapticFeedback.lightImpact();
+        onTap();
+      },
+      child: Container(
+        width: 110,
+        margin: const EdgeInsets.only(right: 12),
+        padding: const EdgeInsets.all(10),
         decoration: BoxDecoration(
-          color: isActive 
-              ? primaryColor 
-              : (isDark ? AppColors.darkSurface : Colors.white),
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(
-            color: isActive 
-                ? primaryColor 
-                : (isDark ? AppColors.borderDark : AppColors.border),
-            width: isActive ? 2 : 1.2,
-          ),
-          boxShadow: isActive 
-              ? [BoxShadow(color: primaryColor.withValues(alpha: 0.3), blurRadius: 10, offset: const Offset(0, 4))]
-              : [BoxShadow(color: Colors.black.withValues(alpha: isDark ? 0.25 : 0.05), blurRadius: 6, offset: const Offset(0, 2))],
+          color: color.withValues(alpha: 0.08),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: color.withValues(alpha: 0.25), width: 1.2),
         ),
-        child: Row(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            // Avatar with initials
-            Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: isActive 
-                    ? Colors.white.withValues(alpha: 0.2) 
-                    : primaryColor.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: Center(
-                child: Text(
-                  name == '8019' ? '80' : '96',
-                  style: GoogleFonts.plusJakartaSans(
-                    color: isActive ? Colors.white : primaryColor,
-                    fontWeight: FontWeight.w800,
-                    fontSize: 12,
-                  ),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            // Staff details
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    name,
-                    style: GoogleFonts.plusJakartaSans(
-                      color: isActive ? Colors.white : (isDark ? Colors.white : AppColors.textPrimary),
-                      fontWeight: FontWeight.w700,
-                      fontSize: 13,
-                    ),
-                  ),
-                  const SizedBox(height: 1),
-                  Text(
-                    'Calls Today',
-                    style: GoogleFonts.plusJakartaSans(
-                      color: isActive 
-                          ? Colors.white.withValues(alpha: 0.75) 
-                          : AppColors.textTertiary,
-                      fontSize: 9,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            // Call counter badge
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-              decoration: BoxDecoration(
-                color: isActive ? Colors.white : primaryColor,
-                borderRadius: BorderRadius.circular(20),
-              ),
-              child: Text(
-                '$count',
-                style: GoogleFonts.plusJakartaSans(
-                  color: isActive ? primaryColor : Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 12,
-                ),
+            Icon(icon, color: color, size: 20),
+            const SizedBox(height: 4),
+            Text(
+              label,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: color,
               ),
             ),
           ],
         ),
       ),
-    ).animate().fadeIn(duration: 450.ms).slideX(begin: name == '8019' ? -0.06 : 0.06);
+    );
   }
 }

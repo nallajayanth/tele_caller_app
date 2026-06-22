@@ -14,6 +14,15 @@ class CallLogModel {
   final String remarks;
   final String deviceId;
 
+  // New fields
+  final double amountReceived;
+  final double amountDue;
+  final bool whatsappDone;
+  final String? standardRemark;
+  final String? orderStatus; // received, packed, dispatched
+  final DateTime? orderStatusUpdatedAt;
+  final String? clinicName;
+
   const CallLogModel({
     required this.id,
     required this.date,
@@ -27,6 +36,13 @@ class CallLogModel {
     required this.orderValue,
     required this.remarks,
     required this.deviceId,
+    this.amountReceived = 0.0,
+    this.amountDue = 0.0,
+    this.whatsappDone = false,
+    this.standardRemark,
+    this.orderStatus,
+    this.orderStatusUpdatedAt,
+    this.clinicName,
   });
 
   CallLogModel copyWith({
@@ -42,6 +58,13 @@ class CallLogModel {
     double? orderValue,
     String? remarks,
     String? deviceId,
+    double? amountReceived,
+    double? amountDue,
+    bool? whatsappDone,
+    String? standardRemark,
+    String? orderStatus,
+    DateTime? orderStatusUpdatedAt,
+    String? clinicName,
   }) {
     return CallLogModel(
       id: id ?? this.id,
@@ -56,6 +79,13 @@ class CallLogModel {
       orderValue: orderValue ?? this.orderValue,
       remarks: remarks ?? this.remarks,
       deviceId: deviceId ?? this.deviceId,
+      amountReceived: amountReceived ?? this.amountReceived,
+      amountDue: amountDue ?? this.amountDue,
+      whatsappDone: whatsappDone ?? this.whatsappDone,
+      standardRemark: standardRemark ?? this.standardRemark,
+      orderStatus: orderStatus ?? this.orderStatus,
+      orderStatusUpdatedAt: orderStatusUpdatedAt ?? this.orderStatusUpdatedAt,
+      clinicName: clinicName ?? this.clinicName,
     );
   }
 
@@ -80,6 +110,13 @@ class CallLogModel {
       'order_value': orderValue,
       'remarks': remarks,
       'device_id': deviceId,
+      'amount_received': amountReceived,
+      'amount_due': amountDue,
+      'whatsapp_done': whatsappDone,
+      'standard_remark': standardRemark,
+      'order_status': orderStatus,
+      'order_status_updated_at': orderStatusUpdatedAt?.toIso8601String(),
+      'clinic_name': clinicName,
     };
   }
 
@@ -97,6 +134,15 @@ class CallLogModel {
       orderValue: (json['order_value'] as num?)?.toDouble() ?? 0.0,
       remarks: (json['remarks'] as String?) ?? '',
       deviceId: (json['device_id'] as String?) ?? '',
+      amountReceived: (json['amount_received'] as num?)?.toDouble() ?? 0.0,
+      amountDue: (json['amount_due'] as num?)?.toDouble() ?? 0.0,
+      whatsappDone: (json['whatsapp_done'] as bool?) ?? false,
+      standardRemark: json['standard_remark'] as String?,
+      orderStatus: json['order_status'] as String?,
+      orderStatusUpdatedAt: json['order_status_updated_at'] != null
+          ? DateTime.parse(json['order_status_updated_at'] as String)
+          : null,
+      clinicName: json['clinic_name'] as String?,
     );
   }
 }
@@ -124,13 +170,20 @@ class CallLogModelAdapter extends TypeAdapter<CallLogModel> {
       orderValue: (fields[9] as num).toDouble(),
       remarks: fields[10] as String,
       deviceId: (fields[11] as String?) ?? '',
+      amountReceived: (fields[12] as num?)?.toDouble() ?? 0.0,
+      amountDue: (fields[13] as num?)?.toDouble() ?? 0.0,
+      whatsappDone: (fields[14] as bool?) ?? false,
+      standardRemark: fields[15] as String?,
+      orderStatus: fields[16] as String?,
+      orderStatusUpdatedAt: fields[17] as DateTime?,
+      clinicName: fields[18] as String?,
     );
   }
 
   @override
   void write(BinaryWriter writer, CallLogModel obj) {
     writer
-      ..writeByte(12)
+      ..writeByte(19)
       ..writeByte(0)
       ..write(obj.id)
       ..writeByte(1)
@@ -154,7 +207,21 @@ class CallLogModelAdapter extends TypeAdapter<CallLogModel> {
       ..writeByte(10)
       ..write(obj.remarks)
       ..writeByte(11)
-      ..write(obj.deviceId);
+      ..write(obj.deviceId)
+      ..writeByte(12)
+      ..write(obj.amountReceived)
+      ..writeByte(13)
+      ..write(obj.amountDue)
+      ..writeByte(14)
+      ..write(obj.whatsappDone)
+      ..writeByte(15)
+      ..write(obj.standardRemark)
+      ..writeByte(16)
+      ..write(obj.orderStatus)
+      ..writeByte(17)
+      ..write(obj.orderStatusUpdatedAt)
+      ..writeByte(18)
+      ..write(obj.clinicName);
   }
 
   @override

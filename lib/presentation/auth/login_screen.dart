@@ -10,6 +10,7 @@ import '../../providers/auth_providers.dart';
 import '../../providers/call_log_providers.dart';
 import '../admin/admin_terminal.dart';
 import '../staff/staff_dashboard.dart';
+import '../warehouse/warehouse_dashboard.dart';
 import '../common/widgets/premium_button.dart';
 import '../common/widgets/success_toast.dart';
 
@@ -94,10 +95,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       icon: Icons.verified_user_rounded,
     );
 
-    // Route dynamically based on their Supabase role config
     Navigator.of(context).pushReplacement(
       MaterialPageRoute(
-        builder: (_) => user.role == 'admin' ? const AdminTerminal() : const StaffDashboard(),
+        builder: (_) => user.role == 'admin'
+            ? const AdminTerminal()
+            : (user.role == 'warehouse'
+                ? const WarehouseDashboard()
+                : const StaffDashboard()),
       ),
     );
   }

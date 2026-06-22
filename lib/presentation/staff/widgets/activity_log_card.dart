@@ -1,24 +1,33 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:image_picker/image_picker.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../data/models/call_log_model.dart';
+import '../../../data/models/order_model.dart';
+import '../../../providers/call_log_providers.dart';
+import '../../../providers/order_providers.dart';
+import '../../common/widgets/multi_image_viewer.dart';
 
-class ActivityLogCard extends StatefulWidget {
+class ActivityLogCard extends ConsumerStatefulWidget {
   final CallLogModel log;
   final int index;
 
   const ActivityLogCard({super.key, required this.log, required this.index});
 
   @override
-  State<ActivityLogCard> createState() => _ActivityLogCardState();
+  ConsumerState<ActivityLogCard> createState() => _ActivityLogCardState();
 }
 
-class _ActivityLogCardState extends State<ActivityLogCard> {
+class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
   bool _expanded = false;
+
 
   @override
   Widget build(BuildContext context) {
@@ -26,6 +35,15 @@ class _ActivityLogCardState extends State<ActivityLogCard> {
     final log = widget.log;
     final statusColor = AppColors.statusColor(log.connectedStatus);
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
+
+    // Check order detail if status is order received
+    final OrderModel? orderDetail = log.product.isNotEmpty
+        ? ref.watch(orderDetailProvider(log.id))
+        : null;
+
+    final isOverdue = log.product.isNotEmpty &&
+        (orderDetail == null || orderDetail.status.toLowerCase() == 'received') &&
+        DateTime.now().difference(log.date).inHours >= 24;
 
     return GestureDetector(
       onTap: () => setState(() => _expanded = !_expanded),
@@ -126,14 +144,41 @@ class _ActivityLogCardState extends State<ActivityLogCard> {
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  _Pill(label: log.connectedStatus, color: statusColor),
-                  const SizedBox(width: 8),
-                  _Pill(
-                    label: '📅 ${DateFormat('dd MMM').format(log.nextFollowUpDate)}',
-                    color: AppColors.info,
+                  Expanded(
+                    child: Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        _Pill(label: log.connectedStatus, color: statusColor),
+                        _Pill(
+                          label: '📅 ${DateFormat('dd MMM').format(log.nextFollowUpDate)}',
+                          color: AppColors.info,
+                        ),
+                        if (log.product.isNotEmpty)
+                          _Pill(
+                            label: '📦 ${(orderDetail?.status ?? 'received').toUpperCase()}',
+                            color: _orderStatusColor(orderDetail?.status ?? 'received'),
+                          ),
+                        if (log.whatsappDone)
+                          Container(
+                            padding: const EdgeInsets.all(4),
+                            decoration: const BoxDecoration(
+                              color: Color(0x2210B981),
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(
+                              Icons.check_rounded,
+                              size: 10,
+                              color: Color(0xFF10B981),
+                            ),
+                          ),
+                      ],
+                    ),
                   ),
-                  const Spacer(),
+                  const SizedBox(width: 8),
                   Text(
                     DateFormat('hh:mm a').format(log.date),
                     style: GoogleFonts.plusJakartaSans(
@@ -159,11 +204,19 @@ class _ActivityLogCardState extends State<ActivityLogCard> {
                             color: isDark ? AppColors.borderDark : AppColors.border,
                             height: 16,
                           ),
+                          if (log.clinicName != null && log.clinicName!.isNotEmpty) ...[
+                            _DetailRow(
+                              icon: Icons.local_hospital_rounded,
+                              label: 'Clinic Name',
+                              value: log.clinicName!,
+                            ),
+                            const SizedBox(height: 10),
+                          ],
                           if (log.product.isNotEmpty) ...[
                             _DetailRow(
                               icon: Icons.medication_rounded,
                               label: 'Product',
-                              value: log.product,
+                              value: _formatProduct(log.product),
                             ),
                             const SizedBox(height: 10),
                           ],
@@ -175,16 +228,274 @@ class _ActivityLogCardState extends State<ActivityLogCard> {
                             ),
                             const SizedBox(height: 10),
                           ],
-                          if (log.remarks.isNotEmpty)
+                          if (log.standardRemark != null && log.standardRemark!.isNotEmpty) ...[
+                            _DetailRow(
+                              icon: Icons.feedback_rounded,
+                              label: 'Standard Remark',
+                              value: log.standardRemark!,
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                          if (log.remarks.isNotEmpty) ...[
                             _DetailRow(
                               icon: Icons.edit_note_rounded,
                               label: 'Remarks',
                               value: log.remarks,
                             ),
-                          const SizedBox(height: 10),
+                            const SizedBox(height: 10),
+                          ],
+                          // Financials row (Order Received only)
+                          if (log.connectedStatus == 'Order Received') ...[
+                            _DetailRow(
+                              icon: Icons.payments_rounded,
+                              label: 'Financials',
+                              value:
+                                  'Received: ₹${log.amountReceived.toStringAsFixed(2)}  |  Due: ₹${log.amountDue.toStringAsFixed(2)}',
+                            ),
+                            const SizedBox(height: 10),
+                          ],
+                          // Order tracking section (any log that has products)
+                          if (log.product.isNotEmpty) ...[
+                            Divider(
+                                color: isDark ? AppColors.borderDark : AppColors.border,
+                                height: 16),
+                            Row(
+                              children: [
+                                Text(
+                                  'Order Tracking',
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.w700,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 8, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: _orderStatusColor(
+                                            orderDetail?.status ?? 'received')
+                                        .withValues(alpha: 0.12),
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                  child: Text(
+                                    (orderDetail?.status ?? 'received')
+                                        .toUpperCase(),
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: _orderStatusColor(
+                                          orderDetail?.status ?? 'received'),
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: 10),
+                            if (isOverdue) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: AppColors.error.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(color: AppColors.error.withValues(alpha: 0.3)),
+                                ),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.warning_amber_rounded, color: AppColors.error, size: 16),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Text(
+                                        'SLA Alert: Pack this order immediately (exceeded 24 hours)!',
+                                        style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: AppColors.error,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ).animate(onPlay: (controller) => controller.repeat(reverse: true))
+                               .shimmer(delay: 2000.ms, duration: 1200.ms, color: AppColors.error.withValues(alpha: 0.15)),
+                              const SizedBox(height: 10),
+                            ],
+                            // Mark as Packed button — shown when status is still received
+                            if (orderDetail == null ||
+                                orderDetail.status == 'received')
+                              GestureDetector(
+                                onTap: () => showModalBottomSheet(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  backgroundColor: Colors.transparent,
+                                  builder: (ctx) => _PackingImageSheet(
+                                      log: log, order: orderDetail),
+                                ),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFF59E0B)
+                                        .withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                        color: const Color(0xFFF59E0B)
+                                            .withValues(alpha: 0.4)),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.inventory_2_rounded,
+                                          size: 16,
+                                          color: Color(0xFFF59E0B)),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Mark as Packed',
+                                        style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: const Color(0xFFF59E0B),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      const Icon(Icons.camera_alt_rounded,
+                                          size: 14,
+                                          color: Color(0xFFF59E0B)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+
+                            // Mark as Dispatched button — shown when status is packed
+                            if (orderDetail != null &&
+                                orderDetail.status == 'packed') ...[
+                              GestureDetector(
+                                onTap: () => showModalBottomSheet(
+                                  context: context,
+                                  isScrollControlled: true,
+                                  backgroundColor: Colors.transparent,
+                                  builder: (ctx) => _DispatchImageSheet(
+                                      log: log, order: orderDetail),
+                                ),
+                                child: Container(
+                                  width: double.infinity,
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF10B981)
+                                        .withValues(alpha: 0.1),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                        color: const Color(0xFF10B981)
+                                            .withValues(alpha: 0.4)),
+                                  ),
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    children: [
+                                      const Icon(Icons.local_shipping_rounded,
+                                          size: 16,
+                                          color: Color(0xFF10B981)),
+                                      const SizedBox(width: 8),
+                                      Text(
+                                        'Mark as Dispatched',
+                                        style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: const Color(0xFF10B981),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 6),
+                                      const Icon(Icons.camera_alt_rounded,
+                                          size: 14,
+                                          color: Color(0xFF10B981)),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 10),
+                            ],
+                            // Packed photo link
+                            if (orderDetail != null &&
+                                (orderDetail.status == 'packed' ||
+                                    orderDetail.status ==
+                                        'dispatched')) ...[
+                              if (orderDetail.packedPhotoUrls.isNotEmpty) ...[
+                                Row(
+                                  children: [
+                                    const Icon(Icons.photo_rounded,
+                                        size: 14, color: AppColors.primary),
+                                    const SizedBox(width: 8),
+                                    GestureDetector(
+                                      onTap: () => MultiImageViewerDialog.show(
+                                          context,
+                                          imageUrls: orderDetail.packedPhotoUrls,
+                                          title: 'Packed Verification Photos'),
+                                      child: Text(
+                                        'View Packed Bag Photo (${orderDetail.packedPhotoUrls.length}) 🖼️',
+                                        style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 13,
+                                          color: AppColors.primaryLight,
+                                          fontWeight: FontWeight.w600,
+                                          decoration:
+                                              TextDecoration.underline,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 10),
+                              ],
+                              if (orderDetail.status == 'dispatched') ...[
+                                _DetailRow(
+                                  icon: Icons.local_shipping_rounded,
+                                  label: 'Logistics Provider',
+                                  value:
+                                      orderDetail.logisticsProvider ?? 'N/A',
+                                ),
+                                const SizedBox(height: 10),
+                                _DetailRow(
+                                  icon: Icons.tag_rounded,
+                                  label: 'Tracking ID',
+                                  value:
+                                      orderDetail.trackingId ?? 'N/A',
+                                ),
+                                const SizedBox(height: 10),
+                                if (orderDetail.dispatchedPhotoUrls.isNotEmpty) ...[
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.photo_rounded,
+                                          size: 14,
+                                          color: AppColors.primary),
+                                      const SizedBox(width: 8),
+                                      GestureDetector(
+                                        onTap: () => MultiImageViewerDialog.show(
+                                            context,
+                                            imageUrls: orderDetail.dispatchedPhotoUrls,
+                                            title: 'Logistics Slip Photos'),
+                                        child: Text(
+                                          'View Tracking Slip Photo (${orderDetail.dispatchedPhotoUrls.length}) 🖼️',
+                                          style:
+                                              GoogleFonts.plusJakartaSans(
+                                            fontSize: 13,
+                                            color: AppColors.primaryLight,
+                                            fontWeight: FontWeight.w600,
+                                            decoration:
+                                                TextDecoration.underline,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 10),
+                                ],
+                              ],
+                            ],
+                          ],
                           _DetailRow(
                             icon: Icons.access_time_rounded,
-                            label: 'Logged',
+                            label: 'Logged At',
                             value: DateFormat('dd MMM yyyy, hh:mm a').format(log.date),
                           ),
                         ],
@@ -205,6 +516,8 @@ class _ActivityLogCardState extends State<ActivityLogCard> {
     switch (status.toLowerCase()) {
       case 'connected':
         return Icons.check_circle_rounded;
+      case 'order received':
+        return Icons.shopping_bag_rounded;
       case 'busy':
         return Icons.phone_in_talk_rounded;
       case 'no answer':
@@ -220,10 +533,800 @@ class _ActivityLogCardState extends State<ActivityLogCard> {
     }
   }
 
+  Color _orderStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'received':
+        return const Color(0xFF3B82F6); // Blue
+      case 'packed':
+        return const Color(0xFFF59E0B); // Orange
+      case 'dispatched':
+        return const Color(0xFF10B981); // Green
+      default:
+        return const Color(0xFF6B7280);
+    }
+  }
+
   String _formatCurrency(double value) {
     if (value >= 100000) return '${(value / 100000).toStringAsFixed(1)}L';
     if (value >= 1000) return '${(value / 1000).toStringAsFixed(1)}K';
     return value.toStringAsFixed(0);
+  }
+
+  String _formatProduct(String product) {
+    try {
+      final list = jsonDecode(product) as List;
+      return list.map((e) {
+        final qty = e['qty'];
+        final price = e['price'];
+        if (price != null && (price as num) > 0) {
+          return '${e['name']} × $qty @ ₹${price.toStringAsFixed(0)}';
+        }
+        return '${e['name']} × $qty';
+      }).join('\n');
+    } catch (_) {
+      return product;
+    }
+  }
+}
+
+// ─── Packing Image Bottom Sheet ───────────────────────────────────────────────
+
+class _PackingImageSheet extends ConsumerStatefulWidget {
+  final CallLogModel log;
+  final OrderModel? order;
+
+  const _PackingImageSheet({required this.log, this.order});
+
+  @override
+  ConsumerState<_PackingImageSheet> createState() => _PackingImageSheetState();
+}
+
+class _PackingImageSheetState extends ConsumerState<_PackingImageSheet> {
+  final List<File> _images = [];
+  bool _uploading = false;
+  final _picker = ImagePicker();
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      if (source == ImageSource.gallery) {
+        final pickedList = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 1920);
+        if (pickedList.isNotEmpty && mounted) {
+          setState(() {
+            _images.addAll(pickedList.map((x) => File(x.path)));
+          });
+        }
+      } else {
+        final picked = await _picker.pickImage(
+            source: source, imageQuality: 80, maxWidth: 1920);
+        if (picked != null && mounted) {
+          setState(() {
+            _images.add(File(picked.path));
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _showAddImageOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1A1D23) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt_rounded, color: AppColors.primaryLight),
+                title: Text('Take Photo', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded, color: AppColors.primaryLight),
+                title: Text('Choose from Gallery', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmPacked() async {
+    if (_images.isEmpty || _uploading) return;
+    setState(() => _uploading = true);
+
+    final errorStr = await ref
+        .read(ordersProvider.notifier)
+        .ensureOrderAndMarkPacked(
+          callLogId: widget.log.id,
+          customerName: widget.log.customerName,
+          product: widget.log.product,
+          orderValue: widget.log.orderValue,
+          deviceId: widget.log.deviceId,
+          imageFilePaths: _images.map((f) => f.path).toList(),
+        );
+
+    if (mounted) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            errorStr == null ? 'Order marked as Packed!' : 'Upload failed: $errorStr',
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+          ),
+          backgroundColor: errorStr == null ? AppColors.success : AppColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Padding(
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1A1D23) : Colors.white,
+          borderRadius:
+              const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // Drag handle
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AppColors.textTertiary.withValues(alpha: 0.35),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            const SizedBox(height: 16),
+
+            // Icon
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: const Icon(Icons.inventory_2_rounded,
+                  color: Color(0xFFF59E0B), size: 28),
+            ),
+            const SizedBox(height: 12),
+
+            Text(
+              'Mark as Packed',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 17,
+                fontWeight: FontWeight.w700,
+                color:
+                    isDark ? AppColors.textOnDark : AppColors.textPrimary,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              'Upload photos of the packed order as proof',
+              style: GoogleFonts.plusJakartaSans(
+                  fontSize: 13, color: AppColors.textTertiary),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 20),
+
+            // Image preview or picker buttons
+            if (_images.isNotEmpty)
+              Container(
+                height: 130,
+                margin: const EdgeInsets.symmetric(horizontal: 20),
+                child: ListView.builder(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _images.length + 1,
+                  itemBuilder: (context, index) {
+                    if (index == _images.length) {
+                      // Add More Card
+                      return Center(
+                        child: InkWell(
+                          onTap: () => _showAddImageOptions(context),
+                          borderRadius: BorderRadius.circular(12),
+                          child: Container(
+                            width: 90,
+                            height: 110,
+                            margin: const EdgeInsets.only(left: 8, top: 8),
+                            decoration: BoxDecoration(
+                              border: Border.all(
+                                color: AppColors.primary.withValues(alpha: 0.4),
+                                width: 1.5,
+                              ),
+                              borderRadius: BorderRadius.circular(12),
+                              color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.black.withValues(alpha: 0.02),
+                            ),
+                            child: const Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Icon(Icons.add_a_photo_rounded, color: AppColors.primaryLight, size: 22),
+                                SizedBox(height: 4),
+                                Text(
+                                  'Add More',
+                                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryLight),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
+                    final file = _images[index];
+                    return Stack(
+                      children: [
+                        Container(
+                          width: 90,
+                          height: 110,
+                          margin: const EdgeInsets.only(right: 8, top: 8),
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: AppColors.primary.withValues(alpha: 0.2),
+                            ),
+                          ),
+                          child: ClipRRect(
+                            borderRadius: BorderRadius.circular(12),
+                            child: Image.file(
+                              file,
+                              fit: BoxFit.cover,
+                            ),
+                          ),
+                        ).animate().fade().scale(duration: 200.ms),
+                        Positioned(
+                          top: 0,
+                          right: 0,
+                          child: GestureDetector(
+                            onTap: () => setState(() => _images.removeAt(index)),
+                            child: Container(
+                              padding: const EdgeInsets.all(4),
+                              decoration: const BoxDecoration(
+                                color: AppColors.error,
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(
+                                Icons.close_rounded,
+                                size: 10,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    );
+                  },
+                ),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _ImageSourceButton(
+                        icon: Icons.camera_alt_rounded,
+                        label: 'Camera',
+                        onTap: () => _pickImage(ImageSource.camera),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: _ImageSourceButton(
+                        icon: Icons.photo_library_rounded,
+                        label: 'Gallery',
+                        onTap: () => _pickImage(ImageSource.gallery),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+
+            const SizedBox(height: 16),
+
+            // Confirm button
+            SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    onPressed: _images.isNotEmpty && !_uploading
+                        ? _confirmPacked
+                        : null,
+                    icon: _uploading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                                color: Colors.white, strokeWidth: 2),
+                          )
+                        : const Icon(Icons.check_circle_rounded, size: 18),
+                    label: Text(
+                      _uploading
+                          ? 'Uploading...'
+                          : 'Confirm & Mark Packed',
+                      style: GoogleFonts.plusJakartaSans(
+                          fontWeight: FontWeight.w700, fontSize: 14),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _images.isNotEmpty
+                          ? const Color(0xFFF59E0B)
+                          : AppColors.textTertiary,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      elevation: 0,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ImageSourceButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _ImageSourceButton(
+      {required this.icon, required this.label, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 22),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withValues(alpha: 0.05)
+              : AppColors.primary.withValues(alpha: 0.05),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(
+              color: AppColors.primary.withValues(alpha: 0.2)),
+        ),
+        child: Column(
+          children: [
+            Icon(icon, color: AppColors.primary, size: 28),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ─── Dispatch Image Bottom Sheet ──────────────────────────────────────────────
+
+class _DispatchImageSheet extends ConsumerStatefulWidget {
+  final CallLogModel log;
+  final OrderModel? order;
+
+  const _DispatchImageSheet({required this.log, this.order});
+
+  @override
+  ConsumerState<_DispatchImageSheet> createState() => _DispatchImageSheetState();
+}
+
+class _DispatchImageSheetState extends ConsumerState<_DispatchImageSheet> {
+  final _logisticsCtrl = TextEditingController();
+  final _trackingCtrl = TextEditingController();
+  final List<File> _images = [];
+  bool _uploading = false;
+  final _picker = ImagePicker();
+
+  @override
+  void dispose() {
+    _logisticsCtrl.dispose();
+    _trackingCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _pickImage(ImageSource source) async {
+    try {
+      if (source == ImageSource.gallery) {
+        final pickedList = await _picker.pickMultiImage(imageQuality: 80, maxWidth: 1920);
+        if (pickedList.isNotEmpty && mounted) {
+          setState(() {
+            _images.addAll(pickedList.map((x) => File(x.path)));
+          });
+        }
+      } else {
+        final picked = await _picker.pickImage(
+            source: source, imageQuality: 80, maxWidth: 1920);
+        if (picked != null && mounted) {
+          setState(() {
+            _images.add(File(picked.path));
+          });
+        }
+      }
+    } catch (_) {}
+  }
+
+  void _showAddImageOptions(BuildContext context) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (_) => Container(
+        decoration: BoxDecoration(
+          color: Theme.of(context).brightness == Brightness.dark ? const Color(0xFF1A1D23) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+        ),
+        child: SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                leading: const Icon(Icons.camera_alt_rounded, color: AppColors.primaryLight),
+                title: Text('Take Photo', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.camera);
+                },
+              ),
+              ListTile(
+                leading: const Icon(Icons.photo_library_rounded, color: AppColors.primaryLight),
+                title: Text('Choose from Gallery', style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600)),
+                onTap: () {
+                  Navigator.pop(context);
+                  _pickImage(ImageSource.gallery);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _confirmDispatched() async {
+    if (_uploading) return;
+    setState(() => _uploading = true);
+
+    String? dispatchPhotoUrl;
+    if (_images.isNotEmpty) {
+      final List<String> urls = [];
+      final notifier = ref.read(ordersProvider.notifier);
+
+      for (int i = 0; i < _images.length; i++) {
+        final file = _images[i];
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final fileName = 'dispatched_${widget.order?.id ?? widget.log.id}_${timestamp}_$i.jpg';
+        final photoUrl = await notifier.uploadPhoto('status_tracking', file.path, fileName);
+        
+        if (photoUrl == null) {
+          if (mounted) {
+            setState(() => _uploading = false);
+            final errStr = notifier.lastUploadError != null ? ': ${notifier.lastUploadError}' : '';
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(content: Text('Photo $i upload failed$errStr')),
+            );
+          }
+          return;
+        }
+        urls.add(photoUrl);
+      }
+      dispatchPhotoUrl = urls.join(',');
+    }
+
+    final logistics = _logisticsCtrl.text.trim();
+    final tracking = _trackingCtrl.text.trim();
+
+    final success = await ref.read(ordersProvider.notifier).updateOrderStatus(
+          widget.order?.id ?? widget.log.id,
+          widget.log.id,
+          'dispatched',
+          dispatchedPhotoUrl: dispatchPhotoUrl,
+          logisticsProvider: logistics.isNotEmpty ? logistics : null,
+          trackingId: tracking.isNotEmpty ? tracking : null,
+        );
+
+    if (mounted) {
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            success
+                ? 'Order marked as Dispatched!'
+                : 'Failed to update. Try again.',
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+          ),
+          backgroundColor: success ? AppColors.success : AppColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          margin: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+        ),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: BoxDecoration(
+          color: isDark ? const Color(0xFF1A1D23) : Colors.white,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // Drag handle
+              Container(
+                width: 40,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: AppColors.textTertiary.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // Icon
+              Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: const Icon(Icons.local_shipping_rounded,
+                    color: Color(0xFF10B981), size: 28),
+              ),
+              const SizedBox(height: 12),
+
+              Text(
+                'Mark as Dispatched',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 17,
+                  fontWeight: FontWeight.w700,
+                  color: isDark ? AppColors.textOnDark : AppColors.textPrimary,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                'Upload photos of logistics receipt/slip as proof',
+                style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13, color: AppColors.textTertiary),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 20),
+
+              // Logistics Details Inputs
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: Column(
+                  children: [
+                    TextField(
+                      controller: _logisticsCtrl,
+                      style: GoogleFonts.plusJakartaSans(fontSize: 14),
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Logistics Provider (optional)',
+                        hintText: 'e.g. Blue Dart, DTDC',
+                        prefixIcon: Icon(Icons.local_shipping_rounded, size: 18),
+                        isDense: true,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
+                      controller: _trackingCtrl,
+                      style: GoogleFonts.plusJakartaSans(fontSize: 14),
+                      decoration: const InputDecoration(
+                        labelText: 'Tracking / AWB Number (optional)',
+                        hintText: 'Enter tracking ID',
+                        prefixIcon: Icon(Icons.tag_rounded, size: 18),
+                        isDense: true,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+
+              // Image preview or picker buttons
+              if (_images.isNotEmpty)
+                Container(
+                  height: 130,
+                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    itemCount: _images.length + 1,
+                    itemBuilder: (context, index) {
+                      if (index == _images.length) {
+                        // Add More Card
+                        return Center(
+                          child: InkWell(
+                            onTap: () => _showAddImageOptions(context),
+                            borderRadius: BorderRadius.circular(12),
+                            child: Container(
+                              width: 90,
+                              height: 110,
+                              margin: const EdgeInsets.only(left: 8, top: 8),
+                              decoration: BoxDecoration(
+                                border: Border.all(
+                                  color: AppColors.primary.withValues(alpha: 0.4),
+                                  width: 1.5,
+                                ),
+                                borderRadius: BorderRadius.circular(12),
+                                color: isDark ? Colors.white.withValues(alpha: 0.03) : Colors.black.withValues(alpha: 0.02),
+                              ),
+                              child: const Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(Icons.add_a_photo_rounded, color: AppColors.primaryLight, size: 22),
+                                  SizedBox(height: 4),
+                                  Text(
+                                    'Add More',
+                                    style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: AppColors.primaryLight),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+
+                      final file = _images[index];
+                      return Stack(
+                        children: [
+                          Container(
+                            width: 90,
+                            height: 110,
+                            margin: const EdgeInsets.only(right: 8, top: 8),
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(12),
+                              border: Border.all(
+                                color: AppColors.primary.withValues(alpha: 0.2),
+                              ),
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(12),
+                              child: Image.file(
+                                file,
+                                fit: BoxFit.cover,
+                              ),
+                            ),
+                          ).animate().fade().scale(duration: 200.ms),
+                          Positioned(
+                            top: 0,
+                            right: 0,
+                            child: GestureDetector(
+                              onTap: () => setState(() => _images.removeAt(index)),
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: AppColors.error,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.close_rounded,
+                                  size: 10,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
+                  ),
+                )
+              else
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: _ImageSourceButton(
+                          icon: Icons.camera_alt_rounded,
+                          label: 'Camera',
+                          onTap: () => _pickImage(ImageSource.camera),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: _ImageSourceButton(
+                          icon: Icons.photo_library_rounded,
+                          label: 'Gallery',
+                          onTap: () => _pickImage(ImageSource.gallery),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+              const SizedBox(height: 16),
+
+              // Confirm button
+              SafeArea(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 8),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      onPressed: _images.isNotEmpty && !_uploading
+                          ? _confirmDispatched
+                          : null,
+                      icon: _uploading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                  color: Colors.white, strokeWidth: 2),
+                            )
+                          : const Icon(Icons.check_circle_rounded, size: 18),
+                      label: Text(
+                        _uploading ? 'Uploading...' : 'Confirm & Mark Dispatched',
+                        style: GoogleFonts.plusJakartaSans(
+                            fontWeight: FontWeight.w700, fontSize: 14),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: _images.isNotEmpty
+                            ? const Color(0xFF10B981)
+                            : AppColors.textTertiary,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14)),
+                        elevation: 0,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 

@@ -35,19 +35,20 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
           .select()
           .eq('phone_number', phoneNumber)
           .maybeSingle();
-
       if (response == null) return false;
 
       final telecaller = TelecallerModel.fromJson(response);
-      final expectedPin = telecaller.role == 'admin' ? '176176' : '9095';
-      if (pin == expectedPin) {
+      bool isPinValid = false;
+      if (pin == telecaller.pin) {
+        isPinValid = true;
+      }
+
+      if (isPinValid) {
         final box = Hive.box('settings');
         // Save session in Hive settings
         await box.put(_sessionKey, telecaller.toJson());
         
         // Update device_id to a valid UUID-syntax based on the logged-in staff's phone number!
-        // This isolates logs automatically because calls will be saved
-        // with the formatted UUID as their deviceId and fetched accordingly.
         final formattedDeviceId = phoneNumber.length == 10 
             ? '00000000-0000-0000-0000-${phoneNumber.padLeft(12, '0')}'
             : phoneNumber;
@@ -72,3 +73,38 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
     state = null;
   }
 }
+
+// Reactive Device ID provider
+final deviceIdProvider = Provider<String>((ref) {
+  final activeUser = ref.watch(activeUserProvider);
+  if (activeUser != null && activeUser.role == 'staff') {
+    final phone = activeUser.phoneNumber;
+    return '00000000-0000-0000-0000-${phone.padLeft(12, '0')}';
+  }
+  
+  // Fallback to Hive cached device ID or a random UUID
+  final box = Hive.box('settings');
+  String? id = box.get('device_id');
+  if (id == null) {
+    id = const Uuid().v4();
+    box.put('device_id', id);
+  }
+  if (id.length == 10 && RegExp(r'^\d+$').hasMatch(id)) {
+    id = '00000000-0000-0000-0000-${id.padLeft(12, '0')}';
+    box.put('device_id', id);
+  }
+  return id;
+});
+
+final telecallersProvider = FutureProvider<List<TelecallerModel>>((ref) async {
+  try {
+    final response = await Supabase.instance.client
+        .from('telecallers')
+        .select();
+    return (response as List<dynamic>)
+        .map((json) => TelecallerModel.fromJson(json as Map<String, dynamic>))
+        .toList();
+  } catch (_) {
+    return [];
+  }
+});

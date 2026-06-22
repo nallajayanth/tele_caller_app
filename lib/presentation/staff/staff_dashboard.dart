@@ -10,6 +10,7 @@ import '../../providers/call_log_providers.dart';
 import '../common/screens/followup_filter_screen.dart';
 import 'tabs/call_form_tab.dart';
 import 'tabs/activity_logs_tab.dart';
+import 'tabs/performance_tab.dart';
 
 class StaffDashboard extends ConsumerStatefulWidget {
   const StaffDashboard({super.key});
@@ -82,7 +83,88 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
   @override
   Widget build(BuildContext context) {
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
+    
+    // Check Operational Lock: on the 1st of the month, target must be set.
+    final targetAsync = ref.watch(staffMonthlyTargetProvider);
+    final isFirstOfMonth = DateTime.now().day == 1;
 
+    if (isFirstOfMonth) {
+      return targetAsync.when(
+        data: (target) {
+          if (target <= 0.0) {
+            return Scaffold(
+              body: Container(
+                decoration: const BoxDecoration(gradient: AppColors.roleSelectorGradient),
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(28.0),
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(20),
+                          decoration: BoxDecoration(
+                            color: AppColors.error.withValues(alpha: 0.1),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: AppColors.error, width: 2),
+                          ),
+                          child: const Icon(
+                            Icons.lock_rounded,
+                            color: AppColors.error,
+                            size: 64,
+                          ),
+                        ),
+                        const SizedBox(height: 24),
+                        Text(
+                          'CONSOLE LOCKED',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w800,
+                            color: Colors.white,
+                            letterSpacing: 0.5,
+                          ),
+                        ),
+                        const SizedBox(height: 12),
+                        Text(
+                          'The staff console is locked because your monthly target has not been set by the Admin. Under company policy, the console is locked on the 1st of the month until targets are set.',
+                          textAlign: TextAlign.center,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 14,
+                            color: Colors.white70,
+                            height: 1.5,
+                          ),
+                        ),
+                        const SizedBox(height: 32),
+                        ElevatedButton.icon(
+                          onPressed: () => _confirmSignOut(context, ref),
+                          icon: const Icon(Icons.logout_rounded, size: 16),
+                          label: const Text('Sign Out'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: Colors.white12,
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            );
+          }
+          return _buildScaffold(isDark);
+        },
+        loading: () => const Scaffold(
+          body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        ),
+        error: (e, _) => _buildScaffold(isDark), // bypass on network or db error to not block work
+      );
+    }
+    
+    return _buildScaffold(isDark);
+  }
+
+  Widget _buildScaffold(bool isDark) {
     return Scaffold(
       appBar: AppBar(
         leading: IconButton(
@@ -98,7 +180,9 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
                   ? 'New Call Log'
                   : _currentIndex == 1
                       ? 'My Activity'
-                      : 'Follow-ups',
+                      : _currentIndex == 2
+                          ? 'Follow-ups'
+                          : 'My Performance',
               style: Theme.of(context).textTheme.titleLarge,
             ),
             Text(
@@ -128,6 +212,7 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
           CallFormTab(),
           ActivityLogsTab(),
           FollowUpFilterScreen(isAdmin: false),
+          PerformanceTab(),
         ],
       ),
       bottomNavigationBar: _PremiumBottomNav(
@@ -192,6 +277,13 @@ class _PremiumBottomNav extends StatelessWidget {
                 isActive: currentIndex == 2,
                 onTap: () => onTap(2),
               ),
+              _NavItem(
+                icon: Icons.trending_up_rounded,
+                activeIcon: Icons.trending_up_rounded,
+                label: 'Performance',
+                isActive: currentIndex == 3,
+                onTap: () => onTap(3),
+              ),
             ],
           ),
         ),
@@ -199,6 +291,7 @@ class _PremiumBottomNav extends StatelessWidget {
     );
   }
 }
+
 
 class _NavItem extends StatelessWidget {
   final IconData icon;
