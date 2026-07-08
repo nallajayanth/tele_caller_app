@@ -57,17 +57,23 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
           final todaySold = _getProductQuantities(todayLogs, products);
           final thisMonthSold = _getProductQuantities(thisMonthLogs, products);
 
+          // Create lookup map for O(1) searches instead of O(N) linear scans
+          final Map<String, ProductModel> productMap = {
+            for (final p in products) p.name: p
+          };
+
           final allProductNames = <String>{};
           for (final p in products) {
-            allProductNames.add(p.name);
+            // Only report on products with sales activity OR low/out-of-stock alerts to avoid rendering 1,300+ items
+            if (p.stock <= 10 || todaySold.containsKey(p.name) || thisMonthSold.containsKey(p.name)) {
+              allProductNames.add(p.name);
+            }
           }
           allProductNames.addAll(thisMonthSold.keys);
+          allProductNames.addAll(todaySold.keys);
 
           final List<_ProductReportRow> productsReport = allProductNames.map((name) {
-            final productObj = products.firstWhere(
-              (p) => p.name == name,
-              orElse: () => ProductModel(id: '', name: name, price: 0, stock: 0),
-            );
+            final productObj = productMap[name] ?? ProductModel(id: '', name: name, price: 0, stock: 0);
 
             final qtyToday = todaySold[name] ?? 0;
             final qtyMonth = thisMonthSold[name] ?? 0;

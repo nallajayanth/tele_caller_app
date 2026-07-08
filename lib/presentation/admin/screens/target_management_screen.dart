@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../providers/call_log_providers.dart';
@@ -13,15 +13,18 @@ import 'user_management_screen.dart';
 final adminTargetProvider = FutureProvider<Map<String, double>>((ref) async {
   try {
     final now = DateTime.now();
-    final response = await Supabase.instance.client
-        .from('monthly_targets')
-        .select('staff_device_id, target_amount')
-        .eq('month', now.month)
-        .eq('year', now.year);
+    final snapshot = await FirebaseFirestore.instance
+        .collection('monthly_targets')
+        .where('month', isEqualTo: now.month)
+        .where('year', isEqualTo: now.year)
+        .get();
     
     final Map<String, double> targetMap = {};
-    for (final row in response as List<dynamic>) {
-      targetMap[row['staff_device_id'] as String] = (row['target_amount'] as num).toDouble();
+    for (final doc in snapshot.docs) {
+      final data = doc.data();
+      final deviceId = data['staff_device_id'] as String;
+      final targetAmount = (data['target_amount'] as num).toDouble();
+      targetMap[deviceId] = targetAmount;
     }
     return targetMap;
   } catch (_) {
@@ -53,24 +56,26 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
     HapticFeedback.mediumImpact();
 
     try {
-      final client = Supabase.instance.client;
+      final client = FirebaseFirestore.instance;
       final now = DateTime.now();
       
       // UUID format of staff device ID based on phone number
       final staffDeviceId = '00000000-0000-0000-0000-${staffPhone.padLeft(12, '0')}';
 
       // Check if target already exists
-      final existing = await client
-          .from('monthly_targets')
-          .select('id')
-          .eq('staff_device_id', staffDeviceId)
-          .eq('month', now.month)
-          .eq('year', now.year)
-          .maybeSingle();
+      final snapshot = await client
+          .collection('monthly_targets')
+          .where('staff_device_id', isEqualTo: staffDeviceId)
+          .where('month', isEqualTo: now.month)
+          .where('year', isEqualTo: now.year)
+          .limit(1)
+          .get();
 
-      if (existing == null) {
+      if (snapshot.docs.isEmpty) {
         // Insert
-        await client.from('monthly_targets').insert({
+        final docRef = client.collection('monthly_targets').doc();
+        await docRef.set({
+          'id': docRef.id,
           'staff_device_id': staffDeviceId,
           'month': now.month,
           'year': now.year,
@@ -79,10 +84,11 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
         });
       } else {
         // Update
-        await client.from('monthly_targets').update({
+        final docId = snapshot.docs.first.id;
+        await client.collection('monthly_targets').doc(docId).update({
           'target_amount': amount,
           'set_at': DateTime.now().toIso8601String(),
-        }).eq('id', existing['id'] as String);
+        });
       }
 
       // Refresh providers

@@ -1,9 +1,9 @@
 import '../../domain/repositories/call_log_repository.dart';
-import '../datasources/supabase_datasource.dart';
+import '../datasources/firestore_datasource.dart';
 import '../models/call_log_model.dart';
 
 class CallLogRepositoryImpl implements CallLogRepository {
-  final SupabaseDataSource _dataSource;
+  final FirestoreDataSource _dataSource;
 
   CallLogRepositoryImpl(this._dataSource);
 

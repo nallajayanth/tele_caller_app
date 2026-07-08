@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../data/models/product_model.dart';
 
 // Default product catalog — seeded once when the products table is empty.
@@ -537,12 +537,12 @@ class ProductsNotifier
     if (!mounted) return;
     state = const AsyncValue.loading();
     try {
-      final data = await Supabase.instance.client
-          .from('products')
-          .select()
-          .order('name');
-      final loaded = (data as List)
-          .map((e) => ProductModel.fromJson(e as Map<String, dynamic>))
+      final snapshot = await FirebaseFirestore.instance
+          .collection('products')
+          .orderBy('name')
+          .get();
+      final loaded = snapshot.docs
+          .map((doc) => ProductModel.fromJson(doc.data()))
           .toList();
 
       if (loaded.isEmpty && !_seeded) {
@@ -560,16 +560,23 @@ class ProductsNotifier
   Future<void> _seedDefaultProducts() async {
     _seeded = true;
     try {
-      // Insert in batches of 100 to stay within Supabase request limits
-      const batchSize = 100;
+      final db = FirebaseFirestore.instance;
+      const batchSize = 400; // Keep it safely below 500
       for (var i = 0; i < _kDefaultProducts.length; i += batchSize) {
         final end = (i + batchSize).clamp(0, _kDefaultProducts.length);
-        final batch = _kDefaultProducts.sublist(i, end);
-        await Supabase.instance.client.from('products').insert(
-          batch
-              .map((name) => {'name': name, 'price': 0.0, 'stock': 0})
-              .toList(),
-        );
+        final batchList = _kDefaultProducts.sublist(i, end);
+        
+        final batch = db.batch();
+        for (final name in batchList) {
+          final docRef = db.collection('products').doc();
+          batch.set(docRef, {
+            'id': docRef.id,
+            'name': name,
+            'price': 0.0,
+            'stock': 0,
+          });
+        }
+        await batch.commit();
       }
       debugPrint('Seeded ${_kDefaultProducts.length} products successfully.');
       await loadProducts();
@@ -580,9 +587,10 @@ class ProductsNotifier
 
   Future<bool> addProduct(ProductModel product) async {
     try {
-      await Supabase.instance.client
-          .from('products')
-          .insert(product.toJson());
+      await FirebaseFirestore.instance
+          .collection('products')
+          .doc(product.id)
+          .set(product.toJson());
       await loadProducts();
       return true;
     } catch (e) {
@@ -593,14 +601,14 @@ class ProductsNotifier
 
   Future<bool> updateProduct(ProductModel product) async {
     try {
-      await Supabase.instance.client
-          .from('products')
+      await FirebaseFirestore.instance
+          .collection('products')
+          .doc(product.id)
           .update({
             'name': product.name,
             'price': product.price,
             'stock': product.stock,
-          })
-          .eq('id', product.id);
+          });
       await loadProducts();
       return true;
     } catch (e) {
@@ -611,10 +619,10 @@ class ProductsNotifier
 
   Future<bool> deleteProduct(String id) async {
     try {
-      await Supabase.instance.client
-          .from('products')
-          .delete()
-          .eq('id', id);
+      await FirebaseFirestore.instance
+          .collection('products')
+          .doc(id)
+          .delete();
       final current = state.valueOrNull ?? [];
       state = AsyncValue.data(current.where((p) => p.id != id).toList());
       return true;

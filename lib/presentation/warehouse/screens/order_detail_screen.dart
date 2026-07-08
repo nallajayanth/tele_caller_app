@@ -286,7 +286,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
         if (mounted) {
           final errStr = notifier.lastUploadError != null ? ': ${notifier.lastUploadError}' : '';
           ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('Failed to upload photo to Supabase storage$errStr')),
+            SnackBar(content: Text('Failed to upload photo to storage$errStr')),
           );
         }
         return;

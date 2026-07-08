@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'core/theme/app_theme.dart';
+import 'core/services/fcm_service.dart';
 import 'providers/theme_provider.dart';
 import 'providers/auth_providers.dart';
 import 'presentation/auth/login_screen.dart';
@@ -18,6 +19,7 @@ class TelecallerApp extends ConsumerWidget {
 
     return MaterialApp(
       title: 'HT TELECALING',
+      navigatorKey: FCMService.navigatorKey,
       debugShowCheckedModeBanner: false,
       theme: AppTheme.lightTheme,
       darkTheme: AppTheme.darkTheme,

@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "564829610445",
+    "project_id": "meditrack-pro-b7d16",
+    "storage_bucket": "meditrack-pro-b7d16.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:564829610445:android:36bafb8b60c300d440e484",
+        "android_client_info": {
+          "package_name": "com.example.telecaller_mobile_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDpDUsHoovfXM9aIArfMQ9NJuA5pFtS2cw"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

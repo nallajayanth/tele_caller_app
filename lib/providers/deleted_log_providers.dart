@@ -1,12 +1,12 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../data/datasources/supabase_deleted_datasource.dart';
+import '../data/datasources/firestore_deleted_datasource.dart';
 import '../data/models/call_log_model.dart';
 import '../data/models/deleted_log_model.dart';
 
-final _deletedDsProvider = Provider((_) => SupabaseDeletedDatasource());
+final _deletedDsProvider = Provider((_) => FirestoreDeletedDatasource());
 
 class DeletedLogNotifier extends StateNotifier<List<DeletedLogModel>> {
-  final SupabaseDeletedDatasource _ds;
+  final FirestoreDeletedDatasource _ds;
 
   DeletedLogNotifier(this._ds) : super([]) {
     _init();

@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
-import '../data/datasources/supabase_datasource.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import '../data/datasources/firestore_datasource.dart';
 import '../data/models/call_log_model.dart';
 import '../data/models/order_model.dart';
 import '../data/repositories/call_log_repository_impl.dart';
 import '../domain/repositories/call_log_repository.dart';
+import '../core/services/fcm_service.dart';
 import 'auth_providers.dart';
 import 'order_providers.dart';
 
@@ -40,78 +43,93 @@ Future<void> setAdminPin(String pin) async {
 
 // Repository provider
 final callLogRepositoryProvider = Provider<CallLogRepository>((ref) {
-  return CallLogRepositoryImpl(SupabaseDataSource());
+  return CallLogRepositoryImpl(FirestoreDataSource());
 });
 
 // State notifier
 class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
   final CallLogRepository _repository;
-  RealtimeChannel? _subscription;
+  final Ref _ref;
+  StreamSubscription? _subscription;
 
-  CallLogNotifier(this._repository) : super(const AsyncLoading()) {
+  CallLogNotifier(this._repository, this._ref) : super(const AsyncLoading()) {
     loadLogs();
     _subscribeRealtime();
   }
 
   void _subscribeRealtime() {
     try {
-      _subscription = Supabase.instance.client
-          .channel('public:call_logs')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'call_logs',
-            callback: (PostgresChangePayload payload) {
-              _handleRealtimeChange(payload);
-            },
-          );
-      _subscription?.subscribe();
+      _subscription = FirebaseFirestore.instance
+          .collection('call_logs')
+          .snapshots()
+          .listen((snapshot) {
+        try {
+          final logs = snapshot.docs
+              .map((doc) => CallLogModel.fromJson(doc.data()))
+              .toList();
+          logs.sort((a, b) => b.date.compareTo(a.date));
+          _checkTodayFollowUps(logs);
+          state = AsyncData(logs);
+        } catch (_) {
+          loadLogs();
+        }
+      }, onError: (_) {});
     } catch (_) {}
   }
 
-  void _handleRealtimeChange(PostgresChangePayload payload) {
-    state.whenData((currentLogs) {
-      final list = List<CallLogModel>.from(currentLogs);
-      final newRecord = payload.newRecord;
-      final oldRecord = payload.oldRecord;
+  void _checkTodayFollowUps(List<CallLogModel> logs) {
+    try {
+      final now = DateTime.now();
+      final today = DateTime(now.year, now.month, now.day);
+      
+      final activeUser = _ref.read(activeUserProvider);
+      if (activeUser == null) return;
 
-      if (payload.eventType == PostgresChangeEvent.insert) {
-        if (newRecord.isNotEmpty) {
-          final log = CallLogModel.fromJson(newRecord);
-          if (!list.any((l) => l.id == log.id)) {
-            list.insert(0, log);
-            list.sort((a, b) => b.date.compareTo(a.date));
-            state = AsyncData(list);
-          }
-        }
-      } else if (payload.eventType == PostgresChangeEvent.update) {
-        if (newRecord.isNotEmpty) {
-          final log = CallLogModel.fromJson(newRecord);
-          final idx = list.indexWhere((l) => l.id == log.id);
-          if (idx != -1) {
-            list[idx] = log;
-          } else {
-            list.add(log);
-          }
-          list.sort((a, b) => b.date.compareTo(a.date));
-          state = AsyncData(list);
-        }
-      } else if (payload.eventType == PostgresChangeEvent.delete) {
-        if (oldRecord.isNotEmpty) {
-          final id = oldRecord['id'] as String?;
-          if (id != null) {
-            list.removeWhere((l) => l.id == id);
-            state = AsyncData(list);
-          }
-        }
-      }
-    });
+      final role = activeUser.role;
+      final currentDeviceId = _ref.read(deviceIdProvider);
+      
+      final relevantLogs = role == 'admin' 
+          ? logs 
+          : logs.where((l) => l.deviceId == currentDeviceId).toList();
+
+      final todayFollowUps = relevantLogs.where((l) => 
+          l.connectedStatus != '__system_config__' &&
+          l.nextFollowUpDate.year == today.year &&
+          l.nextFollowUpDate.month == today.month &&
+          l.nextFollowUpDate.day == today.day
+      ).toList();
+
+      if (todayFollowUps.isEmpty) return;
+
+      FCMService.instance.showLocalNotification(
+        id: 999,
+        title: '📅 Today\'s Follow-ups Due!',
+        body: role == 'admin'
+            ? 'There are ${todayFollowUps.length} total follow-up calls scheduled for today.'
+            : 'You have ${todayFollowUps.length} follow-up calls scheduled for today.',
+        payload: 'follow_up',
+        details: const NotificationDetails(
+          android: AndroidNotificationDetails(
+            'ht_fcm_channel',
+            'HT Alerts',
+            importance: Importance.max,
+            priority: Priority.high,
+          ),
+          iOS: DarwinNotificationDetails(
+            presentAlert: true,
+            presentBadge: true,
+            presentSound: true,
+          ),
+        ),
+      );
+    } catch (_) {}
   }
 
   Future<void> loadLogs() async {
     state = const AsyncLoading();
     try {
       final logs = await _repository.getAllLogs();
+      _checkTodayFollowUps(logs);
       state = AsyncData(logs);
     } catch (e, st) {
       state = AsyncError(e, st);
@@ -122,7 +140,7 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
     try {
       await _repository.addLog(log);
       if (log.product.isNotEmpty) {
-        await Supabase.instance.client.from('orders').insert({
+        await FirebaseFirestore.instance.collection('orders').doc(log.id).set({
           'id': log.id,
           'call_log_id': log.id,
           'customer_name': log.customerName,
@@ -133,6 +151,14 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
           'created_at': DateTime.now().toIso8601String(),
           'updated_at': DateTime.now().toIso8601String(),
         });
+
+        // Notify Admins about the new order
+        FCMService.instance.notifyAdminsOfNewOrder(
+          deviceId: log.deviceId,
+          customerName: log.customerName,
+          product: log.product,
+          orderValue: log.orderValue,
+        );
       }
       await loadLogs();
       return true;
@@ -145,16 +171,17 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
     try {
       await _repository.updateLog(log);
       if (log.product.isNotEmpty) {
-        final client = Supabase.instance.client;
-        final existing = await client.from('orders').select('id').eq('id', log.id).maybeSingle();
+        final client = FirebaseFirestore.instance;
+        final docRef = client.collection('orders').doc(log.id);
+        final doc = await docRef.get();
         final orderData = {
           'customer_name': log.customerName,
           'product': log.product,
           'order_value': log.orderValue,
           'updated_at': DateTime.now().toIso8601String(),
         };
-        if (existing == null) {
-          await client.from('orders').insert({
+        if (!doc.exists) {
+          await docRef.set({
             'id': log.id,
             'call_log_id': log.id,
             'customer_name': log.customerName,
@@ -165,8 +192,16 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
             'created_at': DateTime.now().toIso8601String(),
             'updated_at': DateTime.now().toIso8601String(),
           });
+
+          // Notify Admins about the new order
+          FCMService.instance.notifyAdminsOfNewOrder(
+            deviceId: log.deviceId,
+            customerName: log.customerName,
+            product: log.product,
+            orderValue: log.orderValue,
+          );
         } else {
-          await client.from('orders').update(orderData).eq('id', log.id);
+          await docRef.update(orderData);
         }
       }
       await loadLogs();
@@ -178,7 +213,7 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
 
   Future<bool> deleteLog(String id) async {
     try {
-      await Supabase.instance.client.from('orders').delete().eq('id', id);
+      await FirebaseFirestore.instance.collection('orders').doc(id).delete();
       await _repository.deleteLog(id);
       await loadLogs();
       return true;
@@ -186,18 +221,17 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
       return false;
     }
   }
+
   @override
   void dispose() {
-    if (_subscription != null) {
-      Supabase.instance.client.removeChannel(_subscription!);
-    }
+    _subscription?.cancel();
     super.dispose();
   }
 }
 
 final callLogsProvider =
     StateNotifierProvider<CallLogNotifier, AsyncValue<List<CallLogModel>>>((ref) {
-  return CallLogNotifier(ref.watch(callLogRepositoryProvider));
+  return CallLogNotifier(ref.watch(callLogRepositoryProvider), ref);
 });
 
 // Staff-only logs (filtered by this device)
@@ -386,7 +420,7 @@ final dashboardMetricsProvider = Provider<DashboardMetrics>((ref) {
           logs.where((l) => _isSameDay(l.date, today)).length;
 
       final totalValue =
-          logs.fold<double>(0.0, (sum, l) => sum + l.orderValue);
+          logs.fold<double>(0.0, (total, l) => total + l.orderValue);
 
       final urgent = logs
           .where((l) =>
@@ -447,16 +481,17 @@ final staffMonthlyTargetProvider = FutureProvider<double>((ref) async {
   try {
     final now = DateTime.now();
     final currentDeviceId = ref.watch(deviceIdProvider);
-    final response = await Supabase.instance.client
-        .from('monthly_targets')
-        .select('target_amount')
-        .eq('staff_device_id', currentDeviceId)
-        .eq('month', now.month)
-        .eq('year', now.year)
-        .maybeSingle();
+    final snapshot = await FirebaseFirestore.instance
+        .collection('monthly_targets')
+        .where('staff_device_id', isEqualTo: currentDeviceId)
+        .where('month', isEqualTo: now.month)
+        .where('year', isEqualTo: now.year)
+        .limit(1)
+        .get();
     
-    if (response == null) return 0.0;
-    return (response['target_amount'] as num).toDouble();
+    if (snapshot.docs.isEmpty) return 0.0;
+    final data = snapshot.docs.first.data();
+    return (data['target_amount'] as num).toDouble();
   } catch (_) {
     return 0.0;
   }
@@ -471,7 +506,7 @@ final staffMonthlyAchievementProvider = Provider<double>((ref) {
           l.date.year == now.year &&
           l.date.month == now.month &&
           l.connectedStatus == 'Order Received');
-      return currentMonthLogs.fold<double>(0.0, (sum, l) => sum + l.orderValue);
+      return currentMonthLogs.fold<double>(0.0, (total, l) => total + l.orderValue);
     },
     loading: () => 0.0,
     error: (_, st) => 0.0,

@@ -1,8 +1,9 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 import '../data/models/telecaller_model.dart';
+import '../core/services/fcm_service.dart';
 
 final activeUserProvider = StateNotifierProvider<AuthNotifier, TelecallerModel?>((ref) {
   return AuthNotifier();
@@ -11,12 +12,15 @@ final activeUserProvider = StateNotifierProvider<AuthNotifier, TelecallerModel?>
 class AuthNotifier extends StateNotifier<TelecallerModel?> {
   AuthNotifier() : super(null) {
     _loadSession();
+    if (state != null) {
+      FCMService.instance.registerUserToken(state!.phoneNumber);
+    }
   }
 
   static const String _sessionKey = 'auth_session';
 
   void _loadSession() {
-    final box = Hive.box('settings');
+    final box = Hive.box('secure_settings');
     final sessionMap = box.get(_sessionKey);
     if (sessionMap != null) {
       try {
@@ -30,14 +34,26 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
 
   Future<bool> login(String phoneNumber, String pin) async {
     try {
-      final response = await Supabase.instance.client
-          .from('telecallers')
-          .select()
-          .eq('phone_number', phoneNumber)
-          .maybeSingle();
-      if (response == null) return false;
+      final client = FirebaseFirestore.instance;
+      
+      // Auto-seed: If no users exist yet in Firestore, seed a default admin
+      final checkSnap = await client.collection('telecallers').limit(1).get();
+      if (checkSnap.docs.isEmpty) {
+        await client.collection('telecallers').doc('1234567890').set({
+          'phone_number': '1234567890',
+          'name': 'Default Admin',
+          'role': 'admin',
+          'pin': '1234',
+        });
+      }
 
-      final telecaller = TelecallerModel.fromJson(response);
+      final doc = await client
+          .collection('telecallers')
+          .doc(phoneNumber)
+          .get();
+      if (!doc.exists || doc.data() == null) return false;
+
+      final telecaller = TelecallerModel.fromJson(doc.data()!);
       bool isPinValid = false;
       if (pin == telecaller.pin) {
         isPinValid = true;
@@ -45,8 +61,9 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
 
       if (isPinValid) {
         final box = Hive.box('settings');
-        // Save session in Hive settings
-        await box.put(_sessionKey, telecaller.toJson());
+        final secureBox = Hive.box('secure_settings');
+        // Save session in Hive secure settings
+        await secureBox.put(_sessionKey, telecaller.toJson());
         
         // Update device_id to a valid UUID-syntax based on the logged-in staff's phone number!
         final formattedDeviceId = phoneNumber.length == 10 
@@ -54,6 +71,9 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
             : phoneNumber;
         await box.put('device_id', formattedDeviceId);
         
+        // Register FCM push token for this device
+        await FCMService.instance.registerUserToken(phoneNumber);
+
         state = telecaller;
         return true;
       }
@@ -65,7 +85,8 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
 
   Future<void> signOut() async {
     final box = Hive.box('settings');
-    await box.delete(_sessionKey);
+    final secureBox = Hive.box('secure_settings');
+    await secureBox.delete(_sessionKey);
     
     // Re-generate a generic unique device ID upon logout for security
     await box.put('device_id', const Uuid().v4());
@@ -98,11 +119,11 @@ final deviceIdProvider = Provider<String>((ref) {
 
 final telecallersProvider = FutureProvider<List<TelecallerModel>>((ref) async {
   try {
-    final response = await Supabase.instance.client
-        .from('telecallers')
-        .select();
-    return (response as List<dynamic>)
-        .map((json) => TelecallerModel.fromJson(json as Map<String, dynamic>))
+    final snapshot = await FirebaseFirestore.instance
+        .collection('telecallers')
+        .get();
+    return snapshot.docs
+        .map((doc) => TelecallerModel.fromJson(doc.data()))
         .toList();
   } catch (_) {
     return [];

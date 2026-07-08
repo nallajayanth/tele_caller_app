@@ -11,6 +11,7 @@ import '../common/screens/followup_filter_screen.dart';
 import 'tabs/call_form_tab.dart';
 import 'tabs/activity_logs_tab.dart';
 import 'tabs/performance_tab.dart';
+import '../../providers/location_providers.dart';
 
 class StaffDashboard extends ConsumerStatefulWidget {
   const StaffDashboard({super.key});
@@ -196,6 +197,20 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
           ],
         ),
         actions: [
+          Consumer(
+            builder: (ctx, ref, _) {
+              final isShiftActive = ref.watch(shiftStatusProvider);
+              return IconButton(
+                tooltip: 'Work Shift Location Tracker',
+                icon: Icon(
+                  isShiftActive ? Icons.location_on_rounded : Icons.location_off_rounded,
+                  color: isShiftActive ? AppColors.success : AppColors.textTertiary,
+                  size: 22,
+                ),
+                onPressed: () => _showShiftBottomSheet(context, ref, isShiftActive),
+              );
+            },
+          ),
           IconButton(
             icon: Icon(
               isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
@@ -218,6 +233,177 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
       bottomNavigationBar: _PremiumBottomNav(
         currentIndex: _currentIndex,
         onTap: (i) => setState(() => _currentIndex = i),
+      ),
+    );
+  }
+
+  void _showShiftBottomSheet(BuildContext context, WidgetRef ref, bool isActive) {
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      backgroundColor: Theme.of(context).brightness == Brightness.dark 
+          ? AppColors.darkSurface 
+          : Colors.white,
+      builder: (ctx) => Consumer(
+        builder: (context, ref, _) {
+          final currentActive = ref.watch(shiftStatusProvider);
+          final isDark = Theme.of(ctx).brightness == Brightness.dark;
+          
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: isDark ? Colors.white24 : Colors.black12,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Icon(
+                    currentActive ? Icons.location_on_rounded : Icons.location_off_rounded,
+                    size: 48,
+                    color: currentActive ? AppColors.success : AppColors.textTertiary,
+                  ),
+                  const SizedBox(height: 16),
+                  Text(
+                    'WORK SHIFT LOCATION TRACKER',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                      color: AppColors.primary,
+                      letterSpacing: 0.8,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Live GPS coordinates are updated to the Admin Console only during your active work shift.',
+                    textAlign: TextAlign.center,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      color: AppColors.textTertiary,
+                      height: 1.4,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: currentActive 
+                          ? AppColors.success.withValues(alpha: 0.08) 
+                          : (isDark ? Colors.white10 : Colors.black.withValues(alpha: 0.03)),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: currentActive 
+                            ? AppColors.success.withValues(alpha: 0.3) 
+                            : (isDark ? Colors.white12 : Colors.black12),
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: currentActive ? AppColors.success : AppColors.textTertiary,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          currentActive ? 'SHIFT STATUS: ON DUTY' : 'SHIFT STATUS: OFF DUTY',
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w700,
+                            color: currentActive ? AppColors.success : AppColors.textSecondary,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 32),
+                  ElevatedButton.icon(
+                    onPressed: () async {
+                      Navigator.of(ctx).pop();
+                      HapticFeedback.mediumImpact();
+                      if (currentActive) {
+                        await ref.read(shiftStatusProvider.notifier).endShift();
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(
+                                'Shift ended. Location tracking is now OFF.',
+                                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                              ),
+                              backgroundColor: AppColors.textSecondary,
+                              behavior: SnackBarBehavior.floating,
+                            ),
+                          );
+                        }
+                      } else {
+                        final success = await ref.read(shiftStatusProvider.notifier).startShift();
+                        if (context.mounted) {
+                          if (success) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Shift started! Background location tracking is active.',
+                                  style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                                ),
+                                backgroundColor: AppColors.success,
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          } else {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Failed to start shift. Please grant location permissions.',
+                                  style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                                ),
+                                backgroundColor: AppColors.error,
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          }
+                        }
+                      }
+                    },
+                    icon: Icon(
+                      currentActive ? Icons.location_off_rounded : Icons.location_on_rounded,
+                      size: 18,
+                    ),
+                    label: Text(
+                      currentActive ? 'End Shift (Clock Out)' : 'Start Shift (Clock In)',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 14,
+                      ),
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: currentActive ? AppColors.error : AppColors.primary,
+                      foregroundColor: Colors.white,
+                      minimumSize: const Size(double.infinity, 48),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      elevation: 0,
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                ],
+              ),
+            ),
+          );
+        },
       ),
     );
   }

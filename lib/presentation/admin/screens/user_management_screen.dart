@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../data/models/telecaller_model.dart';
@@ -11,12 +11,12 @@ import '../../common/widgets/success_toast.dart';
 // Employee list provider (loaded directly from DB)
 final employeesProvider = FutureProvider<List<TelecallerModel>>((ref) async {
   try {
-    final response = await Supabase.instance.client
-        .from('telecallers')
-        .select()
-        .order('name');
-    return (response as List<dynamic>)
-        .map((json) => TelecallerModel.fromJson(json as Map<String, dynamic>))
+    final snapshot = await FirebaseFirestore.instance
+        .collection('telecallers')
+        .orderBy('name')
+        .get();
+    return snapshot.docs
+        .map((doc) => TelecallerModel.fromJson(doc.data()))
         .toList();
   } catch (_) {
     return [];
@@ -133,8 +133,8 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
     HapticFeedback.mediumImpact();
 
     try {
-      final client = Supabase.instance.client;
-      await client.from('telecallers').insert({
+      final client = FirebaseFirestore.instance;
+      await client.collection('telecallers').doc(phone).set({
         'phone_number': phone,
         'name': name,
         'pin': pin,
@@ -253,27 +253,57 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
     HapticFeedback.mediumImpact();
 
     try {
-      final client = Supabase.instance.client;
+      final client = FirebaseFirestore.instance;
       
-      // Update phone number (primary key) + name + pin + role
-      await client.from('telecallers').update({
-        'phone_number': newPhone,
-        'name': name,
-        'pin': pin,
-        'role': role,
-      }).eq('phone_number', oldPhone);
-      if (oldPhone != newPhone) {
+      if (oldPhone == newPhone) {
+        await client.collection('telecallers').doc(oldPhone).update({
+          'name': name,
+          'pin': pin,
+          'role': role,
+        });
+      } else {
+        // Create new document with new phone number (doc ID) and copy data, then delete old document
+        await client.collection('telecallers').doc(newPhone).set({
+          'phone_number': newPhone,
+          'name': name,
+          'pin': pin,
+          'role': role,
+        });
+        await client.collection('telecallers').doc(oldPhone).delete();
+
         final oldDeviceId = '00000000-0000-0000-0000-${oldPhone.padLeft(12, '0')}';
         final newDeviceId = '00000000-0000-0000-0000-${newPhone.padLeft(12, '0')}';
 
+        final batch = client.batch();
+
         // Migrate targets
-        await client.from('monthly_targets').update({'staff_device_id': newDeviceId}).eq('staff_device_id', oldDeviceId);
+        final targetSnap = await client
+            .collection('monthly_targets')
+            .where('staff_device_id', isEqualTo: oldDeviceId)
+            .get();
+        for (final doc in targetSnap.docs) {
+          batch.update(doc.reference, {'staff_device_id': newDeviceId});
+        }
         
         // Migrate call logs
-        await client.from('call_logs').update({'device_id': newDeviceId}).eq('device_id', oldDeviceId);
+        final callSnap = await client
+            .collection('call_logs')
+            .where('device_id', isEqualTo: oldDeviceId)
+            .get();
+        for (final doc in callSnap.docs) {
+          batch.update(doc.reference, {'device_id': newDeviceId});
+        }
 
         // Migrate orders
-        await client.from('orders').update({'assigned_staff_device_id': newDeviceId}).eq('assigned_staff_device_id', oldDeviceId);
+        final orderSnap = await client
+            .collection('orders')
+            .where('assigned_staff_device_id', isEqualTo: oldDeviceId)
+            .get();
+        for (final doc in orderSnap.docs) {
+          batch.update(doc.reference, {'assigned_staff_device_id': newDeviceId});
+        }
+
+        await batch.commit();
       }
 
       ref.invalidate(employeesProvider);
@@ -317,8 +347,8 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
     HapticFeedback.heavyImpact();
 
     try {
-      final client = Supabase.instance.client;
-      await client.from('telecallers').delete().eq('phone_number', phone);
+      final client = FirebaseFirestore.instance;
+      await client.collection('telecallers').doc(phone).delete();
       ref.invalidate(employeesProvider);
       if (mounted) {
         SuccessToast.show(context, message: 'Employee removed.');

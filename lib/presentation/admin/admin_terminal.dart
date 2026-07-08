@@ -24,6 +24,7 @@ import 'screens/sales_analytics_screen.dart';
 import 'screens/employee_monitoring_screen.dart';
 import 'screens/user_management_screen.dart';
 import 'screens/product_management_screen.dart';
+import 'screens/live_tracking_screen.dart';
 import 'views/admin_edit_modal.dart';
 import 'widgets/admin_log_card.dart';
 import 'widgets/metric_tile.dart';
@@ -434,6 +435,14 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
                               color: const Color(0xFF3B82F6),
                               onTap: () => Navigator.of(context).push(
                                 MaterialPageRoute(builder: (_) => const TargetManagementScreen()),
+                              ),
+                            ),
+                            _AdminToolBtn(
+                              label: 'Live Map',
+                              icon: Icons.map_rounded,
+                              color: const Color(0xFFEC4899),
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const LiveTrackingScreen()),
                               ),
                             ),
                             _AdminToolBtn(

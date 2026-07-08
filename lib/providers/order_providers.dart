@@ -1,12 +1,15 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_storage/firebase_storage.dart';
 import '../data/models/order_model.dart';
+import '../core/services/fcm_service.dart';
 import 'auth_providers.dart';
 
 class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
-  RealtimeChannel? _subscription;
+  StreamSubscription? _subscription;
   String? lastUploadError;
 
   OrderNotifier() : super(const AsyncLoading()) {
@@ -16,69 +19,33 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
 
   void _subscribeRealtime() {
     try {
-      _subscription = Supabase.instance.client
-          .channel('public:orders')
-          .onPostgresChanges(
-            event: PostgresChangeEvent.all,
-            schema: 'public',
-            table: 'orders',
-            callback: (PostgresChangePayload payload) {
-              _handleRealtimeChange(payload);
-            },
-          );
-      _subscription?.subscribe();
+      _subscription = FirebaseFirestore.instance
+          .collection('orders')
+          .snapshots()
+          .listen((snapshot) {
+        try {
+          final orders = snapshot.docs
+              .map((doc) => OrderModel.fromJson(doc.data()))
+              .toList();
+          orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          state = AsyncData(orders);
+        } catch (_) {
+          loadOrders();
+        }
+      }, onError: (_) {});
     } catch (_) {}
-  }
-
-  void _handleRealtimeChange(PostgresChangePayload payload) {
-    state.whenData((currentOrders) {
-      final list = List<OrderModel>.from(currentOrders);
-      final newRecord = payload.newRecord;
-      final oldRecord = payload.oldRecord;
-
-      if (payload.eventType == PostgresChangeEvent.insert) {
-        if (newRecord.isNotEmpty) {
-          final order = OrderModel.fromJson(newRecord);
-          if (!list.any((o) => o.id == order.id)) {
-            list.insert(0, order);
-            list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-            state = AsyncData(list);
-          }
-        }
-      } else if (payload.eventType == PostgresChangeEvent.update) {
-        if (newRecord.isNotEmpty) {
-          final order = OrderModel.fromJson(newRecord);
-          final idx = list.indexWhere((o) => o.id == order.id);
-          if (idx != -1) {
-            list[idx] = order;
-          } else {
-            list.add(order);
-          }
-          list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-          state = AsyncData(list);
-        }
-      } else if (payload.eventType == PostgresChangeEvent.delete) {
-        if (oldRecord.isNotEmpty) {
-          final id = oldRecord['id'] as String?;
-          if (id != null) {
-            list.removeWhere((o) => o.id == id);
-            state = AsyncData(list);
-          }
-        }
-      }
-    });
   }
 
   Future<void> loadOrders() async {
     state = const AsyncLoading();
     try {
-      final response = await Supabase.instance.client
-          .from('orders')
-          .select()
-          .order('created_at', ascending: false);
+      final snapshot = await FirebaseFirestore.instance
+          .collection('orders')
+          .orderBy('created_at', descending: true)
+          .get();
 
-      final orders = (response as List<dynamic>)
-          .map((json) => OrderModel.fromJson(json as Map<String, dynamic>))
+      final orders = snapshot.docs
+          .map((doc) => OrderModel.fromJson(doc.data()))
           .toList();
       state = AsyncData(orders);
     } catch (e, st) {
@@ -90,12 +57,10 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
     lastUploadError = null;
     try {
       final file = File(filePath);
-      final client = Supabase.instance.client;
-      final path = fileName;
-      
-      await client.storage.from(bucket).upload(path, file, fileOptions: const FileOptions(upsert: true));
-      final String publicUrl = client.storage.from(bucket).getPublicUrl(path);
-      return publicUrl;
+      final ref = FirebaseStorage.instance.ref().child('$bucket/$fileName');
+      await ref.putFile(file);
+      final String downloadUrl = await ref.getDownloadURL();
+      return downloadUrl;
     } catch (e) {
       debugPrint('Upload failed: $e');
       lastUploadError = e.toString();
@@ -113,7 +78,7 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
     String? trackingId,
   }) async {
     try {
-      final client = Supabase.instance.client;
+      final client = FirebaseFirestore.instance;
       final nowStr = DateTime.now().toIso8601String();
 
       final Map<String, dynamic> updateData = {
@@ -126,13 +91,13 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
       if (trackingId != null) updateData['tracking_id'] = trackingId;
 
 
-      await client.from('orders').update(updateData).eq('id', orderId);
+      await client.collection('orders').doc(orderId).update(updateData);
 
       // 2. Update call_logs table to sync status
-      await client.from('call_logs').update({
+      await client.collection('call_logs').doc(callLogId).update({
         'order_status': status,
         'order_status_updated_at': nowStr,
-      }).eq('id', callLogId);
+      });
 
       // Reload orders
       await loadOrders();
@@ -152,7 +117,7 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
     required List<String> imageFilePaths,
   }) async {
     try {
-      final client = Supabase.instance.client;
+      final client = FirebaseFirestore.instance;
       final List<String> urls = [];
 
       for (int i = 0; i < imageFilePaths.length; i++) {
@@ -161,28 +126,20 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
         final timestamp = DateTime.now().millisecondsSinceEpoch;
         final fileName = 'packed_${callLogId}_${timestamp}_$i.jpg';
 
-        // Upload directly so we catch the exact error (e.g. StorageException, AuthException, etc.)
-        await client.storage.from('status_tracking').upload(
-          fileName,
-          file,
-          fileOptions: const FileOptions(upsert: true),
-        );
-
-        final String url = client.storage.from('status_tracking').getPublicUrl(fileName);
+        final ref = FirebaseStorage.instance.ref().child('status_tracking/$fileName');
+        await ref.putFile(file);
+        final String url = await ref.getDownloadURL();
         urls.add(url);
       }
 
       final String combinedUrlString = urls.join(',');
       final nowStr = DateTime.now().toIso8601String();
 
-      final existing = await client
-          .from('orders')
-          .select('id')
-          .eq('id', callLogId)
-          .maybeSingle();
+      final docRef = client.collection('orders').doc(callLogId);
+      final doc = await docRef.get();
 
-      if (existing == null) {
-        await client.from('orders').insert({
+      if (!doc.exists) {
+        await docRef.set({
           'id': callLogId,
           'call_log_id': callLogId,
           'customer_name': customerName,
@@ -194,18 +151,26 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
           'created_at': nowStr,
           'updated_at': nowStr,
         });
+
+        // Notify Admins about the new order
+        FCMService.instance.notifyAdminsOfNewOrder(
+          deviceId: deviceId,
+          customerName: customerName,
+          product: product,
+          orderValue: orderValue,
+        );
       } else {
-        await client.from('orders').update({
+        await docRef.update({
           'status': 'packed',
           'packed_photo_url': combinedUrlString,
           'updated_at': nowStr,
-        }).eq('id', callLogId);
+        });
       }
 
-      await client.from('call_logs').update({
+      await client.collection('call_logs').doc(callLogId).update({
         'order_status': 'packed',
         'order_status_updated_at': nowStr,
-      }).eq('id', callLogId);
+      });
 
       await loadOrders();
       return null;
@@ -217,9 +182,7 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
 
   @override
   void dispose() {
-    if (_subscription != null) {
-      Supabase.instance.client.removeChannel(_subscription!);
-    }
+    _subscription?.cancel();
     super.dispose();
   }
 }

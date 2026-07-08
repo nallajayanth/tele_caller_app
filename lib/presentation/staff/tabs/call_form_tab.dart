@@ -387,7 +387,6 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
                 onChanged: (s) => setState(() {
                   _selectedStatus = s;
                   _statusError = false;
-                  _orderCtrl.text = '0';
                   _updateAmountDue();
                 }),
               ),
