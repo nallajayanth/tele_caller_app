@@ -35,21 +35,12 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
   Future<bool> login(String phoneNumber, String pin) async {
     try {
       final client = FirebaseFirestore.instance;
-      
-      // Auto-seed: If no users exist yet in Firestore, seed a default admin
-      final checkSnap = await client.collection('telecallers').limit(1).get();
-      if (checkSnap.docs.isEmpty) {
-        await client.collection('telecallers').doc('1234567890').set({
-          'phone_number': '1234567890',
-          'name': 'Default Admin',
-          'role': 'admin',
-          'pin': '1234',
-        });
-      }
+      final cleanPhone = phoneNumber.replaceAll(RegExp(r'\D'), '');
+      final queryPhone = cleanPhone.isNotEmpty ? cleanPhone : phoneNumber;
 
       final doc = await client
           .collection('telecallers')
-          .doc(phoneNumber)
+          .doc(queryPhone)
           .get();
       if (!doc.exists || doc.data() == null) return false;
 

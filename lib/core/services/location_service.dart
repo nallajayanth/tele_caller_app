@@ -40,13 +40,16 @@ class LocationService {
     return true;
   }
 
-  /// Helper to get current location and update it to Firestore with lastKnown fallback
+  static double? _lastLat;
+  static double? _lastLng;
+
+  /// Helper to get current location, calculate KM distance, check Anti-fraud, and store route history
   static Future<void> _updateLocation(ServiceInstance service, String phone, String? name) async {
     Position? position;
     try {
       position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.medium,
-        timeLimit: const Duration(seconds: 8),
+        desiredAccuracy: LocationAccuracy.high,
+        timeLimit: const Duration(seconds: 10),
       );
     } catch (e) {
       debugPrint('Background location getCurrentPosition failed: $e');
@@ -57,6 +60,14 @@ class LocationService {
 
     if (position != null) {
       try {
+        final isMocked = position.isMocked;
+
+        // Anti-Fraud Alert: Log if fake GPS is detected
+        if (isMocked) {
+          debugPrint('ANTI-FRAUD WARNING: Fake/Mock GPS detected for staff $phone');
+        }
+
+        // 1. Update live location doc
         await FirebaseFirestore.instance
             .collection('staff_locations')
             .doc(phone)
@@ -65,9 +76,55 @@ class LocationService {
           'phoneNumber': phone,
           'latitude': position.latitude,
           'longitude': position.longitude,
+          'speed': position.speed,
+          'accuracy': position.accuracy,
+          'isMocked': isMocked,
           'timestamp': FieldValue.serverTimestamp(),
           'isOnline': true,
         }, SetOptions(merge: true));
+
+        // 2. Append to today's route history
+        final now = DateTime.now();
+        final dateStr = "${now.year}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}";
+        final attendanceDocId = '${phone}_$dateStr';
+
+        final routeRef = FirebaseFirestore.instance
+            .collection('attendance_logs')
+            .doc(attendanceDocId)
+            .collection('route_points');
+
+        await routeRef.add({
+          'latitude': position.latitude,
+          'longitude': position.longitude,
+          'speed': position.speed,
+          'accuracy': position.accuracy,
+          'is_mocked': isMocked,
+          'timestamp': now.toIso8601String(),
+        });
+
+        // 3. Compute distance increment if previous point exists
+        if (_lastLat != null && _lastLng != null) {
+          final distanceMeters = Geolocator.distanceBetween(
+            _lastLat!,
+            _lastLng!,
+            position.latitude,
+            position.longitude,
+          );
+
+          // Only increment if movement > 15m and speed reasonable (<150km/h) to filter GPS drift
+          if (distanceMeters >= 15 && position.speed < 42) {
+            final kmIncrement = distanceMeters / 1000.0;
+            await FirebaseFirestore.instance
+                .collection('attendance_logs')
+                .doc(attendanceDocId)
+                .set({
+              'total_km': FieldValue.increment(kmIncrement),
+            }, SetOptions(merge: true));
+          }
+        }
+
+        _lastLat = position.latitude;
+        _lastLng = position.longitude;
       } catch (e) {
         debugPrint('Failed to save background location to firestore: $e');
       }
@@ -105,7 +162,10 @@ class LocationService {
       });
     }
 
+    Timer? locationTimer;
+
     service.on('stopService').listen((event) async {
+      locationTimer?.cancel();
       // Mark employee offline in database on service termination
       if (phoneNumber != null) {
         try {
@@ -118,8 +178,8 @@ class LocationService {
       service.stopSelf();
     });
 
-    // 3. Start location polling loop (every 3 minutes)
-    Timer.periodic(const Duration(minutes: 3), (timer) async {
+    // 3. Start high-frequency location polling loop (every 45 seconds)
+    locationTimer = Timer.periodic(const Duration(seconds: 45), (timer) async {
       if (phoneNumber == null) return; // Wait until initialized
 
       if (service is AndroidServiceInstance) {

@@ -13,6 +13,7 @@ import '../../../data/models/call_log_model.dart';
 import '../../../data/models/order_model.dart';
 import '../../../providers/call_log_providers.dart';
 import '../../../providers/order_providers.dart';
+import '../../../core/utils/product_formatter.dart';
 import '../../common/widgets/multi_image_viewer.dart';
 
 class ActivityLogCard extends ConsumerStatefulWidget {
@@ -553,19 +554,7 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
   }
 
   String _formatProduct(String product) {
-    try {
-      final list = jsonDecode(product) as List;
-      return list.map((e) {
-        final qty = e['qty'];
-        final price = e['price'];
-        if (price != null && (price as num) > 0) {
-          return '${e['name']} × $qty @ ₹${price.toStringAsFixed(0)}';
-        }
-        return '${e['name']} × $qty';
-      }).join('\n');
-    } catch (_) {
-      return product;
-    }
+    return ProductFormatter.format(product, singleLine: false);
   }
 }
 

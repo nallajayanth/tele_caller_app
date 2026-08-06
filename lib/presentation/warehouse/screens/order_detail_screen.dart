@@ -9,6 +9,7 @@ import 'package:flutter_animate/flutter_animate.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../data/models/order_model.dart';
+import '../../../core/utils/product_formatter.dart';
 import '../../../providers/order_providers.dart';
 import '../../common/widgets/premium_button.dart';
 import '../../common/widgets/success_toast.dart';
@@ -433,7 +434,7 @@ class _OrderDetailScreenState extends ConsumerState<OrderDetailScreen> {
                 const Divider(height: 24),
                 _RowInfo(label: 'Customer Name', value: order.customerName),
                 const SizedBox(height: 12),
-                _RowInfo(label: 'Product Ordered', value: order.product),
+                _RowInfo(label: 'Product Ordered', value: ProductFormatter.format(order.product, singleLine: false)),
                 const SizedBox(height: 12),
                 _RowInfo(label: 'Order Logged At', value: DateFormat('dd MMM yyyy, hh:mm a').format(order.createdAt)),
               ],

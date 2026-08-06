@@ -15,6 +15,7 @@ import '../../../providers/call_log_providers.dart';
 import '../../../providers/order_providers.dart';
 import '../../common/widgets/multi_image_viewer.dart';
 import '../../../data/models/telecaller_model.dart';
+import '../../../core/utils/product_formatter.dart';
 import '../../../providers/auth_providers.dart';
 
 class AdminLogCard extends ConsumerWidget {
@@ -445,23 +446,7 @@ class AdminLogCard extends ConsumerWidget {
   }
 
   String _formatProductLabel(String product) {
-    try {
-      final list = jsonDecode(product) as List;
-      if (list.isEmpty) return '';
-      final formattedItems = list.map((item) {
-        final name = item['name'] as String? ?? '';
-        final qty = item['qty'] ?? 1;
-        final price = item['price'];
-        if (price != null && (price as num) > 0) {
-          final priceVal = double.tryParse(price.toString()) ?? 0.0;
-          return '$name × $qty @ ₹${priceVal.toStringAsFixed(0)}';
-        }
-        return '$name × $qty';
-      }).toList();
-      return formattedItems.join(', ');
-    } catch (_) {
-      return product;
-    }
+    return ProductFormatter.format(product);
   }
 
   Color _orderStatusColor(String status) {

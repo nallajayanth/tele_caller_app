@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_spacing.dart';
+import '../../core/services/location_permission_helper.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/call_log_providers.dart';
@@ -22,6 +23,14 @@ class StaffDashboard extends ConsumerStatefulWidget {
 
 class _StaffDashboardState extends ConsumerState<StaffDashboard> {
   int _currentIndex = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      LocationPermissionHelper.checkAndRequestPermission(context: context);
+    });
+  }
 
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
     final confirm = await showDialog<bool>(

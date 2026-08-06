@@ -16,6 +16,7 @@ import '../../../providers/call_log_providers.dart';
 import '../../common/widgets/premium_button.dart';
 import '../../common/widgets/status_chip_selector.dart';
 import '../../common/widgets/success_toast.dart';
+import '../widgets/attendance_card.dart';
 
 const _uuid = Uuid();
 
@@ -314,6 +315,8 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
         children: [
+          const SizedBox(height: 12),
+          const AttendanceCard(),
           const SizedBox(height: 16),
           _SectionCard(
             color: cardColor,

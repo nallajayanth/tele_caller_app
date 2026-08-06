@@ -7,6 +7,7 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../providers/call_log_providers.dart';
 import '../../../providers/order_providers.dart';
+import '../../../core/utils/product_formatter.dart';
 
 class PerformanceTab extends ConsumerWidget {
   const PerformanceTab({super.key});
@@ -348,19 +349,7 @@ class PerformanceTab extends ConsumerWidget {
   }
 
   String _formatProduct(String product) {
-    try {
-      final list = jsonDecode(product) as List;
-      return list.map((e) {
-        final qty = e['qty'];
-        final price = e['price'];
-        if (price != null && (price as num) > 0) {
-          return '${e['name']} × $qty @ ₹${price.toStringAsFixed(0)}';
-        }
-        return '${e['name']} × $qty';
-      }).join(', ');
-    } catch (_) {
-      return product;
-    }
+    return ProductFormatter.format(product);
   }
 
   Widget _buildDailyOrderStats(BuildContext context, bool isDark, DailyOrderStats stats) {

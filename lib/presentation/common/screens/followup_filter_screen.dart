@@ -14,6 +14,7 @@ import '../../admin/views/admin_edit_modal.dart';
 import '../../admin/widgets/admin_log_card.dart';
 import '../../common/widgets/success_toast.dart';
 import '../../../data/models/order_model.dart';
+import '../../../core/utils/product_formatter.dart';
 import '../../common/widgets/multi_image_viewer.dart';
 
 
@@ -584,7 +585,7 @@ class _ReadOnlyCardState extends ConsumerState<_ReadOnlyCard> {
                   if (log.product.isNotEmpty)
                     Expanded(
                       child: _StatusPill(
-                          label: '💊 ${log.product}',
+                          label: '💊 ${ProductFormatter.format(log.product)}',
                           color: AppColors.info),
                     ),
                   const Spacer(),

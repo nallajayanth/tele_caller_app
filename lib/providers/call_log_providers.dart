@@ -59,13 +59,19 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
 
   void _subscribeRealtime() {
     try {
-      _subscription = FirebaseFirestore.instance
-          .collection('call_logs')
-          .snapshots()
-          .listen((snapshot) {
+      final activeUser = _ref.read(activeUserProvider);
+      final role = activeUser?.role;
+      final currentDeviceId = _ref.read(deviceIdProvider);
+
+      Query query = FirebaseFirestore.instance.collection('call_logs');
+      if (role != 'admin') {
+        query = query.where('device_id', isEqualTo: currentDeviceId);
+      }
+
+      _subscription = query.snapshots().listen((snapshot) {
         try {
           final logs = snapshot.docs
-              .map((doc) => CallLogModel.fromJson(doc.data()))
+              .map((doc) => CallLogModel.fromJson(doc.data() as Map<String, dynamic>))
               .toList();
           logs.sort((a, b) => b.date.compareTo(a.date));
           _checkTodayFollowUps(logs);
@@ -128,7 +134,16 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
   Future<void> loadLogs() async {
     state = const AsyncLoading();
     try {
-      final logs = await _repository.getAllLogs();
+      final activeUser = _ref.read(activeUserProvider);
+      final role = activeUser?.role;
+      final currentDeviceId = _ref.read(deviceIdProvider);
+
+      final List<CallLogModel> logs;
+      if (role == 'admin') {
+        logs = await _repository.getAllLogs();
+      } else {
+        logs = await _repository.getLogsByDeviceId(currentDeviceId);
+      }
       _checkTodayFollowUps(logs);
       state = AsyncData(logs);
     } catch (e, st) {

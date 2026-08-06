@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_spacing.dart';
+import '../../core/utils/product_formatter.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/order_providers.dart';
@@ -271,7 +272,7 @@ class _OrderList extends StatelessWidget {
               children: [
                 const SizedBox(height: 4),
                 Text(
-                  '📦 Product: ${order.product}',
+                  '📦 Product: ${ProductFormatter.format(order.product)}',
                   style: GoogleFonts.plusJakartaSans(
                     fontSize: 12,
                     color: AppColors.textTertiary,

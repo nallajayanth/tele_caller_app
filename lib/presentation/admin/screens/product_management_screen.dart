@@ -122,7 +122,7 @@ class _ProductManagementScreenState extends ConsumerState<ProductManagementScree
                           }
 
                           setDialogState(() => _isProcessing = false);
-                          if (mounted) {
+                          if (mounted && context.mounted) {
                             setState(() => _isProcessing = false);
                             Navigator.of(ctx).pop();
                             if (success) {

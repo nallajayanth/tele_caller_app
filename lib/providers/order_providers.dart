@@ -9,23 +9,30 @@ import '../core/services/fcm_service.dart';
 import 'auth_providers.dart';
 
 class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
+  final Ref _ref;
   StreamSubscription? _subscription;
   String? lastUploadError;
 
-  OrderNotifier() : super(const AsyncLoading()) {
+  OrderNotifier(this._ref) : super(const AsyncLoading()) {
     loadOrders();
     _subscribeRealtime();
   }
 
   void _subscribeRealtime() {
     try {
-      _subscription = FirebaseFirestore.instance
-          .collection('orders')
-          .snapshots()
-          .listen((snapshot) {
+      final activeUser = _ref.read(activeUserProvider);
+      final role = activeUser?.role;
+      final deviceId = _ref.read(deviceIdProvider);
+
+      Query query = FirebaseFirestore.instance.collection('orders');
+      if (role != 'admin' && role != 'warehouse') {
+        query = query.where('assigned_staff_device_id', isEqualTo: deviceId);
+      }
+
+      _subscription = query.snapshots().listen((snapshot) {
         try {
           final orders = snapshot.docs
-              .map((doc) => OrderModel.fromJson(doc.data()))
+              .map((doc) => OrderModel.fromJson(doc.data() as Map<String, dynamic>))
               .toList();
           orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
           state = AsyncData(orders);
@@ -39,14 +46,21 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
   Future<void> loadOrders() async {
     state = const AsyncLoading();
     try {
-      final snapshot = await FirebaseFirestore.instance
-          .collection('orders')
-          .orderBy('created_at', descending: true)
-          .get();
+      final activeUser = _ref.read(activeUserProvider);
+      final role = activeUser?.role;
+      final deviceId = _ref.read(deviceIdProvider);
+
+      Query query = FirebaseFirestore.instance.collection('orders');
+      if (role != 'admin' && role != 'warehouse') {
+        query = query.where('assigned_staff_device_id', isEqualTo: deviceId);
+      }
+
+      final snapshot = await query.get();
 
       final orders = snapshot.docs
-          .map((doc) => OrderModel.fromJson(doc.data()))
+          .map((doc) => OrderModel.fromJson(doc.data() as Map<String, dynamic>))
           .toList();
+      orders.sort((a, b) => b.createdAt.compareTo(a.createdAt));
       state = AsyncData(orders);
     } catch (e, st) {
       state = AsyncError(e, st);
@@ -188,7 +202,7 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
 }
 
 final ordersProvider = StateNotifierProvider<OrderNotifier, AsyncValue<List<OrderModel>>>((ref) {
-  return OrderNotifier();
+  return OrderNotifier(ref);
 });
 
 // Helper provider to filter orders by status
