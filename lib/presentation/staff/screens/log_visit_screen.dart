@@ -166,6 +166,9 @@ class _LogVisitScreenState extends ConsumerState<LogVisitScreen> {
 
             TextFormField(
               controller: _addressCtrl,
+              minLines: 2,
+              maxLines: 4,
+              keyboardType: TextInputType.multiline,
               decoration: const InputDecoration(
                 labelText: 'Address / Location Details *',
                 prefixIcon: Icon(Icons.location_city_rounded),

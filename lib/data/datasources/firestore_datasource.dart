@@ -6,24 +6,27 @@ class FirestoreDataSource {
   CollectionReference get _collection => _firestore.collection('call_logs');
 
   Future<List<CallLogModel>> getAllLogs() async {
-    final querySnapshot = await _collection
-        .orderBy('date', descending: true)
-        .get();
+    final querySnapshot = await _collection.get();
     
-    return querySnapshot.docs
+    final logs = querySnapshot.docs
         .map((doc) => CallLogModel.fromJson(doc.data() as Map<String, dynamic>))
         .toList();
+
+    logs.sort((a, b) => b.date.compareTo(a.date));
+    return logs;
   }
 
   Future<List<CallLogModel>> getLogsByDeviceId(String deviceId) async {
     final querySnapshot = await _collection
         .where('device_id', isEqualTo: deviceId)
-        .orderBy('date', descending: true)
         .get();
 
-    return querySnapshot.docs
+    final logs = querySnapshot.docs
         .map((doc) => CallLogModel.fromJson(doc.data() as Map<String, dynamic>))
         .toList();
+
+    logs.sort((a, b) => b.date.compareTo(a.date));
+    return logs;
   }
 
   Future<void> addLog(CallLogModel log) async {

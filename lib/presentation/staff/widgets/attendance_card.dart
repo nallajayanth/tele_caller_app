@@ -234,12 +234,13 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
-                      height: 48,
+                      height: 52,
                       child: ElevatedButton.icon(
                         onPressed: _isProcessing ? null : _confirmEndDuty,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.error,
                           foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
                           ),
@@ -254,6 +255,7 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
                         label: Text(
                           _isProcessing ? 'Processing...' : 'END DUTY SHIFT',
                           style: GoogleFonts.plusJakartaSans(
+                            fontSize: 14,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.5,
                           ),
@@ -271,12 +273,13 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
-                      height: 48,
+                      height: 52,
                       child: ElevatedButton.icon(
                         onPressed: _isProcessing ? null : _handleStartDuty,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: AppColors.primaryLight,
                           foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
                           ),
@@ -291,6 +294,7 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
                         label: Text(
                           _isProcessing ? 'Starting Duty...' : 'START DUTY SHIFT',
                           style: GoogleFonts.plusJakartaSans(
+                            fontSize: 14,
                             fontWeight: FontWeight.w700,
                             letterSpacing: 0.5,
                           ),

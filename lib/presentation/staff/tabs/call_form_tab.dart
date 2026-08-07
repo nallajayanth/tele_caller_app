@@ -258,20 +258,62 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
           const SizedBox(height: 10),
           ..._selectedProducts.entries.map((entry) {
             final subtotal = entry.value.qty * entry.value.price;
+            final allProducts = ref.watch(productsProvider).valueOrNull ?? [];
+            final productObj = allProducts.where((p) => p.name == entry.key).firstOrNull;
+            final stock = productObj?.stock ?? 0;
+            final avail = stock <= 0 ? 0 : (entry.value.qty <= stock ? entry.value.qty : stock);
+            final unavail = entry.value.qty - avail;
+
             return Padding(
               padding: const EdgeInsets.only(bottom: 6),
               child: Row(
                 children: [
-                  const Icon(Icons.check_circle_rounded, size: 14, color: AppColors.success),
+                  Icon(
+                    unavail > 0 ? Icons.warning_amber_rounded : Icons.check_circle_rounded,
+                    size: 14,
+                    color: unavail > 0 ? AppColors.warning : AppColors.success,
+                  ),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      entry.key,
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w500,
-                        color: isDark ? AppColors.textOnDark : AppColors.textPrimary,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          entry.key,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 13,
+                            fontWeight: FontWeight.w500,
+                            color: isDark ? AppColors.textOnDark : AppColors.textPrimary,
+                          ),
+                        ),
+                        if (unavail > 0 || avail > 0)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 2),
+                            child: Wrap(
+                              spacing: 4,
+                              children: [
+                                if (avail > 0)
+                                  Text(
+                                    '$avail avail',
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: AppColors.success,
+                                    ),
+                                  ),
+                                if (unavail > 0)
+                                  Text(
+                                    '${avail > 0 ? "• " : ""}$unavail out of stock',
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w700,
+                                      color: AppColors.error,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                      ],
                     ),
                   ),
                   Text(
@@ -360,8 +402,11 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
               _Field(
                 controller: _placeCtrl,
                 label: 'Place / Market Area (Optional)',
-                hint: 'City or region',
+                hint: 'City, region or address details',
                 icon: Icons.location_on_rounded,
+                minLines: 2,
+                maxLines: 4,
+                keyboardType: TextInputType.multiline,
                 validator: null,
               ),
             ],
@@ -735,15 +780,19 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
   late Map<String, _ProductSelection> _selections;
   // price text controllers — one per product name, created lazily
   final Map<String, TextEditingController> _priceCtrls = {};
+  final Map<String, TextEditingController> _qtyCtrls = {};
 
   @override
   void initState() {
     super.initState();
     _selections = Map.from(widget.initialSelections);
-    // pre-populate price controllers for already-selected products
+    // pre-populate price & quantity controllers for already-selected products
     for (final e in _selections.entries) {
       _priceCtrls[e.key] = TextEditingController(
         text: e.value.price > 0 ? e.value.price.toStringAsFixed(0) : '',
+      );
+      _qtyCtrls[e.key] = TextEditingController(
+        text: e.value.qty > 0 ? '${e.value.qty}' : '',
       );
     }
     _searchCtrl.addListener(_onSearch);
@@ -754,6 +803,9 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
     _searchCtrl.removeListener(_onSearch);
     _searchCtrl.dispose();
     for (final c in _priceCtrls.values) {
+      c.dispose();
+    }
+    for (final c in _qtyCtrls.values) {
       c.dispose();
     }
     super.dispose();
@@ -771,6 +823,219 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
 
   TextEditingController _priceCtrlFor(String name) {
     return _priceCtrls.putIfAbsent(name, () => TextEditingController());
+  }
+
+  TextEditingController _qtyCtrlFor(String name, int qty) {
+    final ctrl = _qtyCtrls.putIfAbsent(
+      name,
+      () => TextEditingController(text: qty > 0 ? '$qty' : ''),
+    );
+    final textVal = qty > 0 ? '$qty' : '';
+    if (ctrl.text != textVal && !FocusScope.of(context).hasFocus) {
+      ctrl.text = textVal;
+    }
+    return ctrl;
+  }
+
+  void _setQuantity(ProductModel product, int newQty, TextEditingController priceCtrl) {
+    setState(() {
+      if (newQty <= 0) {
+        _selections.remove(product.name);
+        _priceCtrls[product.name]?.clear();
+        _qtyCtrls[product.name]?.clear();
+      } else {
+        final price = double.tryParse(priceCtrl.text) ?? 0;
+        _selections[product.name] = _ProductSelection(qty: newQty, price: price);
+        final qCtrl = _qtyCtrlFor(product.name, newQty);
+        final newText = '$newQty';
+        if (qCtrl.text != newText) {
+          qCtrl.text = newText;
+          qCtrl.selection = TextSelection.fromPosition(TextPosition(offset: newText.length));
+        }
+      }
+    });
+  }
+
+  void _onQtyInput(ProductModel product, String text, TextEditingController priceCtrl) {
+    final val = int.tryParse(text);
+    setState(() {
+      if (val == null || val <= 0) {
+        _selections.remove(product.name);
+      } else {
+        final sel = _selections[product.name];
+        final price = sel?.price ?? (double.tryParse(priceCtrl.text) ?? 0);
+        _selections[product.name] = _ProductSelection(qty: val, price: price);
+      }
+    });
+  }
+
+  Widget _buildStockBadges(int stock, int qty) {
+    if (qty == 0) {
+      return Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+        decoration: BoxDecoration(
+          color: stock > 0
+              ? AppColors.success.withValues(alpha: 0.12)
+              : AppColors.error.withValues(alpha: 0.12),
+          borderRadius: BorderRadius.circular(5),
+        ),
+        child: Text(
+          stock > 0 ? 'Stock: $stock' : 'Out of stock',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 10,
+            fontWeight: FontWeight.w600,
+            color: stock > 0 ? AppColors.success : AppColors.error,
+          ),
+        ),
+      );
+    }
+
+    final available = stock <= 0 ? 0 : (qty <= stock ? qty : stock);
+    final unavailable = qty - available;
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (stock > 0 && qty <= stock) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.success.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Text(
+              'Stock: $stock',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: AppColors.success,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.success.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                  color: AppColors.success.withValues(alpha: 0.35), width: 0.8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.check_circle_outline_rounded,
+                    size: 10, color: AppColors.success),
+                const SizedBox(width: 3),
+                Text(
+                  '$qty Avail',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.success,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else if (stock <= 0) ...[
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(5),
+            ),
+            child: Text(
+              'Out of stock',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 10,
+                fontWeight: FontWeight.w600,
+                color: AppColors.error,
+              ),
+            ),
+          ),
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                  color: AppColors.error.withValues(alpha: 0.35), width: 0.8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    size: 10, color: AppColors.error),
+                const SizedBox(width: 3),
+                Text(
+                  '$unavailable Needed',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.error,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ] else ...[
+          // Partial stock: qty > stock and stock > 0
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.success.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                  color: AppColors.success.withValues(alpha: 0.35), width: 0.8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.check_circle_outline_rounded,
+                    size: 10, color: AppColors.success),
+                const SizedBox(width: 3),
+                Text(
+                  '$available Avail',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.success,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 4),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.18),
+              borderRadius: BorderRadius.circular(5),
+              border: Border.all(
+                  color: AppColors.error.withValues(alpha: 0.35), width: 0.8),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.warning_amber_rounded,
+                    size: 10, color: AppColors.error),
+                const SizedBox(width: 3),
+                Text(
+                  '$unavailable Out of stock',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.error,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
   }
 
   @override
@@ -791,14 +1056,18 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
     final double runningTotal = _selections.entries
         .fold(0, (sum, e) => sum + e.value.qty * e.value.price);
 
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.91,
-      decoration: BoxDecoration(
-        color: sheetBg,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      child: Column(
-        children: [
+    final bottomInset = MediaQuery.of(context).viewInsets.bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: bottomInset),
+      child: Container(
+        height: MediaQuery.of(context).size.height * 0.91,
+        decoration: BoxDecoration(
+          color: sheetBg,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        child: Column(
+          children: [
           // Drag handle
           Container(
             margin: const EdgeInsets.only(top: 12),
@@ -986,6 +1255,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                             children: [
                               // Product name row + stock + qty stepper
                               Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Expanded(
                                     child: Column(
@@ -1005,83 +1275,61 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                                                     : AppColors.textPrimary),
                                           ),
                                         ),
-                                        const SizedBox(height: 3),
-                                        // Stock badge
-                                        Row(
-                                          children: [
-                                            Container(
-                                              padding: const EdgeInsets.symmetric(
-                                                  horizontal: 6, vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: product.stock > 0
-                                                    ? AppColors.success
-                                                        .withValues(alpha: 0.12)
-                                                    : AppColors.error
-                                                        .withValues(alpha: 0.12),
-                                                borderRadius:
-                                                    BorderRadius.circular(6),
-                                              ),
-                                              child: Text(
-                                                product.stock > 0
-                                                    ? 'Stock: ${product.stock}'
-                                                    : 'Out of stock',
-                                                style: GoogleFonts.plusJakartaSans(
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: product.stock > 0
-                                                      ? AppColors.success
-                                                      : AppColors.error,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
+                                        const SizedBox(height: 4),
+                                        // Stock badges with live status breakdown
+                                        _buildStockBadges(product.stock, qty),
                                       ],
                                     ),
                                   ),
-                                  // Qty controls
+                                  const SizedBox(width: 8),
+                                  // Qty controls with + / - and manual text entry
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
                                       if (qty > 0) ...[
                                         _QtyButton(
                                           icon: Icons.remove_rounded,
-                                          onTap: () => setState(() {
-                                            if (qty == 1) {
-                                              _selections.remove(product.name);
-                                              priceCtrl.clear();
-                                            } else {
-                                              _selections[product.name] =
-                                                  sel!.copyWith(qty: qty - 1);
-                                            }
-                                          }),
+                                          onTap: () => _setQuantity(product, qty - 1, priceCtrl),
                                         ),
-                                        Padding(
-                                          padding: const EdgeInsets.symmetric(
-                                              horizontal: 8),
-                                          child: Text(
-                                            '$qty',
+                                        Container(
+                                          width: 48,
+                                          height: 32,
+                                          margin: const EdgeInsets.symmetric(horizontal: 4),
+                                          decoration: BoxDecoration(
+                                            color: isDark ? AppColors.darkSurface : Colors.white,
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: Border.all(
+                                              color: AppColors.primary.withValues(alpha: 0.4),
+                                              width: 1,
+                                            ),
+                                          ),
+                                          child: TextField(
+                                            controller: _qtyCtrlFor(product.name, qty),
+                                            keyboardType: TextInputType.number,
+                                            textAlign: TextAlign.center,
+                                            scrollPadding: const EdgeInsets.only(bottom: 120),
+                                            inputFormatters: [
+                                              FilteringTextInputFormatter.digitsOnly,
+                                            ],
                                             style: GoogleFonts.plusJakartaSans(
-                                              fontSize: 14,
+                                              fontSize: 13,
                                               fontWeight: FontWeight.w700,
                                               color: AppColors.primary,
                                             ),
+                                            decoration: const InputDecoration(
+                                              isDense: true,
+                                              contentPadding: EdgeInsets.symmetric(vertical: 6),
+                                              border: InputBorder.none,
+                                              focusedBorder: InputBorder.none,
+                                              enabledBorder: InputBorder.none,
+                                            ),
+                                            onChanged: (v) => _onQtyInput(product, v, priceCtrl),
                                           ),
                                         ),
                                       ],
                                       _QtyButton(
                                         icon: Icons.add_rounded,
-                                        onTap: product.stock > 0 && qty >= product.stock
-                                            ? () {}
-                                            : () => setState(() {
-                                                  _selections[product.name] =
-                                                      _ProductSelection(
-                                                    qty: qty + 1,
-                                                    price: double.tryParse(
-                                                            priceCtrl.text) ??
-                                                        0,
-                                                  );
-                                                }),
+                                        onTap: () => _setQuantity(product, qty + 1, priceCtrl),
                                       ),
                                     ],
                                   ),
@@ -1099,6 +1347,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                                     Expanded(
                                       child: TextField(
                                         controller: priceCtrl,
+                                        scrollPadding: const EdgeInsets.only(bottom: 120),
                                         keyboardType: const TextInputType
                                             .numberWithOptions(decimal: true),
                                         inputFormatters: [
@@ -1207,6 +1456,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
           ),
         ],
       ),
+    ),
     );
   }
 }
@@ -1295,7 +1545,8 @@ class _Field extends StatelessWidget {
   final String label;
   final String hint;
   final IconData icon;
-  final int maxLines;
+  final int? maxLines;
+  final int? minLines;
   final TextInputType keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final String? Function(String?)? validator;
@@ -1305,6 +1556,7 @@ class _Field extends StatelessWidget {
     required this.hint,
     required this.icon,
     this.maxLines = 1,
+    this.minLines,
     this.keyboardType = TextInputType.text,
     this.inputFormatters,
     this.validator,
@@ -1315,6 +1567,7 @@ class _Field extends StatelessWidget {
     return TextFormField(
       controller: controller,
       maxLines: maxLines,
+      minLines: minLines,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
       validator: validator,

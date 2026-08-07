@@ -13,7 +13,7 @@ import '../../../data/models/call_log_model.dart';
 import '../../../data/models/order_model.dart';
 import '../../../providers/call_log_providers.dart';
 import '../../../providers/order_providers.dart';
-import '../../../core/utils/product_formatter.dart';
+import '../../../providers/product_providers.dart';
 import '../../common/widgets/multi_image_viewer.dart';
 
 class ActivityLogCard extends ConsumerStatefulWidget {
@@ -214,11 +214,7 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
                             const SizedBox(height: 10),
                           ],
                           if (log.product.isNotEmpty) ...[
-                            _DetailRow(
-                              icon: Icons.medication_rounded,
-                              label: 'Product',
-                              value: _formatProduct(log.product),
-                            ),
+                            _buildProductDetailRow(context, log.product),
                             const SizedBox(height: 10),
                           ],
                           if (log.customerResponse.isNotEmpty) ...[
@@ -553,8 +549,168 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
     return value.toStringAsFixed(0);
   }
 
-  String _formatProduct(String product) {
-    return ProductFormatter.format(product, singleLine: false);
+
+  Widget _buildProductDetailRow(BuildContext context, String productStr) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final allProducts = ref.watch(productsProvider).valueOrNull ?? [];
+    final items = _parseProductItems(productStr);
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Icon(Icons.medication_rounded, size: 14, color: AppColors.primary),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Product',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: AppColors.textTertiary,
+                  letterSpacing: 0.3,
+                ),
+              ),
+              const SizedBox(height: 4),
+              ...items.map((item) {
+                final productObj = allProducts
+                    .where((p) => p.name.trim().toLowerCase() == item.name.trim().toLowerCase())
+                    .firstOrNull;
+                final stock = productObj?.stock ?? 0;
+                final avail = stock <= 0 ? 0 : (item.qty <= stock ? item.qty : stock);
+                final unavail = item.qty - avail;
+
+                return Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${item.name} × ${item.qty}',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? AppColors.textOnDark : AppColors.textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        physics: const BouncingScrollPhysics(),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (avail > 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.success.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                      color: AppColors.success.withValues(alpha: 0.25), width: 0.8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.check_circle_outline_rounded,
+                                        size: 10, color: AppColors.success),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      '$avail Available',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.success,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            if (unavail > 0) ...[
+                              if (avail > 0) const SizedBox(width: 4),
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.error.withValues(alpha: 0.12),
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: Border.all(
+                                      color: AppColors.error.withValues(alpha: 0.25), width: 0.8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.warning_amber_rounded,
+                                        size: 10, color: AppColors.error),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      '$unavail Out of stock',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w700,
+                                        color: AppColors.error,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              }),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  List<_ProductItemLog> _parseProductItems(String raw) {
+    if (raw.trim().isEmpty) return [];
+    final trimmed = raw.trim();
+
+    if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is List) {
+          return decoded.map((e) {
+            if (e is Map) {
+              final name = (e['name'] ?? e['product_name'] ?? 'Product').toString();
+              final qty = (e['qty'] ?? e['quantity'] ?? 1) as num;
+              return _ProductItemLog(name: name, qty: qty.toInt());
+            }
+            return _ProductItemLog(name: e.toString(), qty: 1);
+          }).toList();
+        } else if (decoded is Map) {
+          final name = (decoded['name'] ?? decoded['product_name'] ?? 'Product').toString();
+          final qty = (decoded['qty'] ?? decoded['quantity'] ?? 1) as num;
+          return [_ProductItemLog(name: name, qty: qty.toInt())];
+        }
+      } catch (_) {}
+    }
+
+    final lines = trimmed.split(RegExp(r'[\r\n,]+'));
+    final items = <_ProductItemLog>[];
+
+    for (final line in lines) {
+      final l = line.trim();
+      if (l.isEmpty) continue;
+      final match = RegExp(r'^(.+?)\s*[×x]\s*(\d+)$', caseSensitive: false).firstMatch(l);
+      if (match != null) {
+        final name = match.group(1)!.trim();
+        final qty = int.tryParse(match.group(2)!) ?? 1;
+        items.add(_ProductItemLog(name: name, qty: qty));
+      } else {
+        items.add(_ProductItemLog(name: l, qty: 1));
+      }
+    }
+
+    return items;
   }
 }
 
@@ -1434,4 +1590,10 @@ class _DetailRow extends StatelessWidget {
       ],
     );
   }
+}
+
+class _ProductItemLog {
+  final String name;
+  final int qty;
+  _ProductItemLog({required this.name, required this.qty});
 }

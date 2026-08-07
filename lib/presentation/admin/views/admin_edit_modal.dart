@@ -298,7 +298,14 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
                       ],
                     ),
                     const SizedBox(height: 12),
-                    _EditField(ctrl: _placeCtrl, label: 'Place', icon: Icons.location_on_rounded),
+                    _EditField(
+                      ctrl: _placeCtrl,
+                      label: 'Place / Market Area',
+                      icon: Icons.location_on_rounded,
+                      minLines: 2,
+                      maxLines: 4,
+                      keyboardType: TextInputType.multiline,
+                    ),
                     const SizedBox(height: 16),
                     Text(
                       'CALL STATUS',
@@ -576,7 +583,8 @@ class _EditField extends StatelessWidget {
   final TextEditingController ctrl;
   final String label;
   final IconData icon;
-  final int maxLines;
+  final int? maxLines;
+  final int? minLines;
   final TextInputType keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final String? Function(String?)? validator;
@@ -586,6 +594,7 @@ class _EditField extends StatelessWidget {
     required this.label,
     required this.icon,
     this.maxLines = 1,
+    this.minLines,
     this.keyboardType = TextInputType.text,
     this.inputFormatters,
     this.validator,
@@ -596,6 +605,7 @@ class _EditField extends StatelessWidget {
     return TextFormField(
       controller: ctrl,
       maxLines: maxLines,
+      minLines: minLines,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
       validator: validator,

@@ -36,9 +36,10 @@ class VisitsNotifier extends StateNotifier<AsyncValue<List<VisitModel>>> {
         query = query.where('staff_phone', isEqualTo: _userPhone);
       }
 
-      final snap = await query.orderBy('arrival_time', descending: true).get();
+      final snap = await query.get();
 
       final visits = snap.docs.map((doc) => VisitModel.fromJson(doc.data() as Map<String, dynamic>)).toList();
+      visits.sort((a, b) => b.arrivalTime.compareTo(a.arrivalTime));
       state = AsyncValue.data(visits);
     } catch (e, st) {
       debugPrint('Failed to load visits: $e');
