@@ -58,7 +58,21 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
 
   void _updateAmountDue() {
     final orderVal = double.tryParse(_orderCtrl.text.replaceAll(',', '')) ?? 0.0;
-    final amtReceived = double.tryParse(_amountReceivedCtrl.text.replaceAll(',', '')) ?? 0.0;
+    double amtReceived = double.tryParse(_amountReceivedCtrl.text.replaceAll(',', '')) ?? 0.0;
+
+    if (orderVal > 0 && amtReceived > orderVal) {
+      amtReceived = orderVal;
+      final clampedText = orderVal == orderVal.truncateToDouble()
+          ? orderVal.toInt().toString()
+          : orderVal.toStringAsFixed(2);
+      if (_amountReceivedCtrl.text != clampedText) {
+        _amountReceivedCtrl.text = clampedText;
+        _amountReceivedCtrl.selection = TextSelection.fromPosition(
+          TextPosition(offset: clampedText.length),
+        );
+      }
+    }
+
     final amtDue = orderVal - amtReceived;
     final newText = amtDue >= 0 ? amtDue.toStringAsFixed(2) : '0.00';
     if (_amountDueCtrl.text != newText) {
@@ -416,27 +430,50 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
 
           _SectionCard(
             color: cardColor,
-            title: 'Product (Optional)',
-            icon: Icons.medication_rounded,
-            children: [
-              _buildProductSelector(context, isDark, cardColor),
-            ],
-          ).animate().fadeIn(delay: 120.ms).slideY(begin: 0.1),
-
-          const SizedBox(height: 14),
-
-          _SectionCard(
-            color: cardColor,
             title: 'Call Status *',
             icon: Icons.signal_cellular_alt_rounded,
             children: [
-              StatusChipSelector(
-                selected: _selectedStatus,
-                onChanged: (s) => setState(() {
-                  _selectedStatus = s;
-                  _statusError = false;
-                  _updateAmountDue();
-                }),
+              DropdownButtonFormField<String>(
+                initialValue: _selectedStatus,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Select Call Status *',
+                  prefixIcon: Icon(Icons.signal_cellular_alt_rounded,
+                      color: AppColors.textTertiary, size: 20),
+                ),
+                dropdownColor: cardColor,
+                style: GoogleFonts.plusJakartaSans(
+                  color: isDark ? Colors.white : AppColors.textPrimary,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w500,
+                ),
+                items: kStatusOptions.map((opt) {
+                  return DropdownMenuItem<String>(
+                    value: opt.label,
+                    child: Row(
+                      children: [
+                        Icon(opt.icon, size: 18, color: opt.color),
+                        const SizedBox(width: 10),
+                        Text(
+                          opt.label,
+                          style: GoogleFonts.plusJakartaSans(
+                            color: isDark ? Colors.white : AppColors.textPrimary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }).toList(),
+                onChanged: (s) {
+                  if (s != null) {
+                    setState(() {
+                      _selectedStatus = s;
+                      _statusError = false;
+                      _updateAmountDue();
+                    });
+                  }
+                },
               ),
               if (_statusError)
                 Padding(
@@ -450,6 +487,17 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
                     ),
                   ),
                 ),
+            ],
+          ).animate().fadeIn(delay: 120.ms).slideY(begin: 0.1),
+
+          const SizedBox(height: 14),
+
+          _SectionCard(
+            color: cardColor,
+            title: 'Product (Optional)',
+            icon: Icons.medication_rounded,
+            children: [
+              _buildProductSelector(context, isDark, cardColor),
             ],
           ).animate().fadeIn(delay: 160.ms).slideY(begin: 0.1),
 
@@ -524,6 +572,145 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
 
           _SectionCard(
             color: cardColor,
+            title: 'Financials & Communication',
+            icon: Icons.payments_rounded,
+            children: [
+              // Order Value (Read-only / Auto-calculated from selected products)
+              TextFormField(
+                controller: _orderCtrl,
+                readOnly: true,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 18,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.accent,
+                ),
+                decoration: InputDecoration(
+                  labelText: 'Order Value',
+                  hintText: '0.00',
+                  hintStyle: GoogleFonts.plusJakartaSans(
+                    color: AppColors.textTertiary,
+                    fontSize: 18,
+                  ),
+                  prefixIcon: Container(
+                    padding: const EdgeInsets.only(left: 14, right: 8),
+                    child: Text(
+                      '₹',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                        color: AppColors.accent,
+                      ),
+                    ),
+                  ),
+                  prefixIconConstraints:
+                      const BoxConstraints(minWidth: 0, minHeight: 0),
+                  filled: true,
+                  fillColor: AppColors.accent.withValues(alpha: 0.05),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                    borderSide: BorderSide(
+                      color: AppColors.accent.withValues(alpha: 0.3),
+                      width: 1.5,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                    borderSide: BorderSide(
+                      color: AppColors.accent.withValues(alpha: 0.3),
+                      width: 1.5,
+                    ),
+                  ),
+                ),
+                validator: (v) {
+                  if (_selectedStatus == 'Order Received') {
+                    if (v == null || v.trim().isEmpty) {
+                      return 'Required for Order Received';
+                    }
+                    final val = double.tryParse(v.replaceAll(',', ''));
+                    if (val == null || val <= 0) {
+                      return 'Must select products to generate order value';
+                    }
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 14),
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(
+                    child: _Field(
+                      controller: _amountReceivedCtrl,
+                      label: 'Received (Optional)',
+                      hint: '0.00',
+                      icon: Icons.download_rounded,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                      ],
+                      validator: (v) {
+                        if (v != null && v.trim().isNotEmpty) {
+                          final orderVal = double.tryParse(_orderCtrl.text.replaceAll(',', '')) ?? 0.0;
+                          final amtRec = double.tryParse(v.replaceAll(',', '')) ?? 0.0;
+                          if (orderVal > 0 && amtRec > orderVal) {
+                            return 'Cannot exceed Order Value (₹${orderVal.toStringAsFixed(0)})';
+                          }
+                        }
+                        return null;
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: _Field(
+                      controller: _amountDueCtrl,
+                      label: 'Due',
+                      hint: '0.00',
+                      icon: Icons.upload_rounded,
+                      readOnly: true,
+                      keyboardType:
+                          const TextInputType.numberWithOptions(decimal: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              CheckboxListTile(
+                value: _whatsappDone,
+                onChanged: (val) =>
+                    setState(() => _whatsappDone = val ?? false),
+                activeColor: AppColors.primary,
+                title: Text(
+                  'WhatsApp Message Done ✓',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                    color: _whatsappDone
+                        ? AppColors.success
+                        : (isDark ? Colors.white70 : AppColors.textPrimary),
+                  ),
+                ),
+                subtitle: Text(
+                  'Confirm follow-up communication sent to customer',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    color: AppColors.textTertiary,
+                  ),
+                ),
+                contentPadding: EdgeInsets.zero,
+                controlAffinity: ListTileControlAffinity.leading,
+              ),
+            ],
+          ).animate().fadeIn(delay: 240.ms).slideY(begin: 0.1),
+
+          const SizedBox(height: 14),
+
+          _SectionCard(
+            color: cardColor,
             title: 'Follow-Up Date *',
             icon: Icons.calendar_today_rounded,
             children: [
@@ -563,177 +750,7 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
                 ),
               ),
             ],
-          ).animate().fadeIn(delay: 240.ms).slideY(begin: 0.1),
-
-          const SizedBox(height: 14),
-
-          _SectionCard(
-            color: cardColor,
-            title: 'Order Value *',
-            icon: Icons.currency_rupee_rounded,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: TextFormField(
-                      controller: _orderCtrl,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                      ],
-                      validator: (v) {
-                        if (_selectedStatus == 'Order Received') {
-                          if (v == null || v.trim().isEmpty) {
-                            return 'Required for Order Received';
-                          }
-                          final val = double.tryParse(v.replaceAll(',', ''));
-                          if (val == null || val <= 0) {
-                            return 'Must be greater than 0';
-                          }
-                        }
-                        return null;
-                      },
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 20,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.accent,
-                      ),
-                      decoration: InputDecoration(
-                        prefixIcon: Container(
-                          padding:
-                              const EdgeInsets.only(left: 14, right: 8),
-                          child: Text(
-                            '₹',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.accent,
-                            ),
-                          ),
-                        ),
-                        prefixIconConstraints:
-                            const BoxConstraints(minWidth: 0, minHeight: 0),
-                        hintText: '0.00',
-                        hintStyle: GoogleFonts.plusJakartaSans(
-                          color: AppColors.textTertiary,
-                          fontSize: 20,
-                        ),
-                        enabledBorder: OutlineInputBorder(
-                          borderRadius:
-                              BorderRadius.circular(AppSpacing.inputRadius),
-                          borderSide: BorderSide(
-                            color: AppColors.accent.withValues(alpha: 0.3),
-                            width: 1.5,
-                          ),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderRadius:
-                              BorderRadius.circular(AppSpacing.inputRadius),
-                          borderSide: const BorderSide(
-                              color: AppColors.accent, width: 2),
-                        ),
-                        fillColor: AppColors.accent.withValues(alpha: 0.04),
-                        filled: true,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  GestureDetector(
-                    onTap: () {
-                      HapticFeedback.lightImpact();
-                      setState(() => _orderCtrl.text = '0');
-                    },
-                    child: Container(
-                      height: 56,
-                      padding:
-                          const EdgeInsets.symmetric(horizontal: 14),
-                      decoration: BoxDecoration(
-                        color: AppColors.textTertiary.withValues(alpha: 0.1),
-                        borderRadius:
-                            BorderRadius.circular(AppSpacing.inputRadius),
-                        border: Border.all(
-                            color: AppColors.border, width: 1.5),
-                      ),
-                      child: const Center(
-                        child: Icon(Icons.exposure_zero_rounded,
-                            color: AppColors.textTertiary, size: 20),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ],
           ).animate().fadeIn(delay: 280.ms).slideY(begin: 0.1),
-
-          const SizedBox(height: 14),
-
-          _SectionCard(
-            color: cardColor,
-            title: 'Financials & Communication',
-            icon: Icons.payments_rounded,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _Field(
-                      controller: _amountReceivedCtrl,
-                      label: 'Amount Received (Optional)',
-                      hint: '0.00',
-                      icon: Icons.download_rounded,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: _Field(
-                      controller: _amountDueCtrl,
-                      label: 'Amount Due (Calculated)',
-                      hint: '0.00',
-                      icon: Icons.upload_rounded,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              CheckboxListTile(
-                value: _whatsappDone,
-                onChanged: (val) =>
-                    setState(() => _whatsappDone = val ?? false),
-                activeColor: AppColors.primary,
-                title: Text(
-                  'WhatsApp Message Done ✓',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: _whatsappDone
-                        ? AppColors.success
-                        : (isDark ? Colors.white70 : AppColors.textPrimary),
-                  ),
-                ),
-                subtitle: Text(
-                  'Confirm follow-up communication sent to customer',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 11,
-                    color: AppColors.textTertiary,
-                  ),
-                ),
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-              ),
-            ],
-          ).animate().fadeIn(delay: 300.ms).slideY(begin: 0.1),
 
           const SizedBox(height: 24),
 
@@ -1547,6 +1564,7 @@ class _Field extends StatelessWidget {
   final IconData icon;
   final int? maxLines;
   final int? minLines;
+  final bool readOnly;
   final TextInputType keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final String? Function(String?)? validator;
@@ -1557,6 +1575,7 @@ class _Field extends StatelessWidget {
     required this.icon,
     this.maxLines = 1,
     this.minLines,
+    this.readOnly = false,
     this.keyboardType = TextInputType.text,
     this.inputFormatters,
     this.validator,
@@ -1568,6 +1587,7 @@ class _Field extends StatelessWidget {
       controller: controller,
       maxLines: maxLines,
       minLines: minLines,
+      readOnly: readOnly,
       keyboardType: keyboardType,
       inputFormatters: inputFormatters,
       validator: validator,
