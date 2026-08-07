@@ -22,9 +22,11 @@ class ProductFormatter {
               return name.toString();
             }
             return e.toString();
-          }).toList();
+          }).where((str) => str.isNotEmpty).toList();
 
-          return items.join(singleLine ? ', ' : '\n');
+          if (items.isNotEmpty) {
+            return items.join(singleLine ? ', ' : '\n');
+          }
         } else if (decoded is Map) {
           final name = decoded['name'] ?? decoded['product_name'] ?? 'Product';
           final qty = decoded['qty'] ?? decoded['quantity'];
@@ -33,7 +35,14 @@ class ProductFormatter {
           }
           return name.toString();
         }
-      } catch (_) {}
+      } catch (_) {
+        final matches = RegExp(r'"name"\s*:\s*"([^"]+)"').allMatches(trimmed);
+        if (matches.isNotEmpty) {
+          return matches.map((m) => m.group(1)).whereType<String>().join(singleLine ? ', ' : '\n');
+        }
+        final cleaned = trimmed.replaceAll(RegExp(r'[\[\]\{\}"]'), '').replaceAll(RegExp(r'\s+'), ' ').trim();
+        return cleaned;
+      }
     }
 
     return trimmed;

@@ -64,6 +64,7 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
             Padding(
               padding: const EdgeInsets.all(16),
               child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
                     width: 44,
@@ -92,40 +93,79 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
                           ),
                         ),
                         const SizedBox(height: 3),
-                        Row(
+                        Wrap(
+                          spacing: 6,
+                          runSpacing: 2,
+                          crossAxisAlignment: WrapCrossAlignment.center,
                           children: [
-                            Icon(Icons.location_on_rounded,
-                                size: 12, color: AppColors.textTertiary),
-                            const SizedBox(width: 3),
-                            Flexible(
-                              child: Text(
-                                log.place,
-                                overflow: TextOverflow.ellipsis,
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 12,
-                                  color: AppColors.textTertiary,
-                                ),
+                            if (log.place.isNotEmpty)
+                              Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.location_on_rounded,
+                                      size: 12, color: AppColors.textTertiary),
+                                  const SizedBox(width: 3),
+                                  ConstrainedBox(
+                                    constraints: const BoxConstraints(maxWidth: 110),
+                                    child: Text(
+                                      log.place,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 12,
+                                        color: AppColors.textTertiary,
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
-                            ),
-                            const SizedBox(width: 8),
                             _CopyablePhone(mobile: log.mobile),
                           ],
                         ),
                       ],
                     ),
                   ),
+                  const SizedBox(width: 8),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      if (log.orderValue > 0)
+                      if (log.orderValue > 0) ...[
                         Text(
                           '₹${_formatCurrency(log.orderValue)}',
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
-                            fontWeight: FontWeight.w700,
+                            fontWeight: FontWeight.w800,
                             color: AppColors.accent,
                           ),
                         ),
+                        const SizedBox(height: 2),
+                        if (log.amountReceived > 0)
+                          Text(
+                            'Rec: ₹${_formatCurrency(log.amountReceived)}',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.success,
+                            ),
+                          ),
+                        if (log.amountDue > 0)
+                          Text(
+                            'Due: ₹${_formatCurrency(log.amountDue)}',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.error,
+                            ),
+                          )
+                        else if (log.amountReceived > 0 && log.amountDue <= 0)
+                          Text(
+                            'Paid ✓',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.success,
+                            ),
+                          ),
+                      ],
                       const SizedBox(height: 4),
                       AnimatedRotation(
                         turns: _expanded ? 0.5 : 0,
@@ -163,6 +203,23 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
                             label: '📦 ${(orderDetail?.status ?? 'received').toUpperCase()}',
                             color: _orderStatusColor(orderDetail?.status ?? 'received'),
                           ),
+                        if (log.orderValue > 0) ...[
+                          if (log.amountReceived > 0)
+                            _Pill(
+                              label: '💵 Rec: ₹${log.amountReceived.toStringAsFixed(0)}',
+                              color: AppColors.success,
+                            ),
+                          if (log.amountDue > 0)
+                            _Pill(
+                              label: '⏳ Due: ₹${log.amountDue.toStringAsFixed(0)}',
+                              color: AppColors.error,
+                            )
+                          else if (log.amountReceived > 0)
+                            _Pill(
+                              label: '✓ Paid Full',
+                              color: AppColors.success,
+                            ),
+                        ],
                         if (log.whatsappDone)
                           Container(
                             padding: const EdgeInsets.all(4),
@@ -241,14 +298,9 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
                             ),
                             const SizedBox(height: 10),
                           ],
-                          // Financials row (Order Received only)
-                          if (log.connectedStatus == 'Order Received') ...[
-                            _DetailRow(
-                              icon: Icons.payments_rounded,
-                              label: 'Financials',
-                              value:
-                                  'Received: ₹${log.amountReceived.toStringAsFixed(2)}  |  Due: ₹${log.amountDue.toStringAsFixed(2)}',
-                            ),
+                          // Financials summary box (Order Received or Order Value > 0)
+                          if (log.connectedStatus == 'Order Received' || log.orderValue > 0) ...[
+                            _buildFinancialsCard(context, log),
                             const SizedBox(height: 10),
                           ],
                           // Order tracking section (any log that has products)
@@ -507,6 +559,73 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
         .animate(delay: Duration(milliseconds: 60 * widget.index))
         .fadeIn(duration: 350.ms)
         .slideY(begin: 0.12);
+  }
+
+  Widget _buildFinancialsCard(BuildContext context, CallLogModel log) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? const Color(0xFF1E222B) : const Color(0xFFF8F9FA);
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isDark ? AppColors.borderDark : AppColors.border,
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(Icons.payments_rounded, size: 14, color: AppColors.primary),
+              const SizedBox(width: 6),
+              Text(
+                'Financial Details',
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                  letterSpacing: 0.3,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _FinancialBox(
+                  label: 'Total Order',
+                  amount: log.orderValue,
+                  color: AppColors.primary,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _FinancialBox(
+                  label: 'Received',
+                  amount: log.amountReceived,
+                  color: AppColors.success,
+                  icon: Icons.check_circle_rounded,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _FinancialBox(
+                  label: 'Amount Due',
+                  amount: log.amountDue,
+                  color: log.amountDue > 0 ? AppColors.error : AppColors.success,
+                  icon: log.amountDue > 0 ? Icons.error_rounded : Icons.verified_rounded,
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   IconData _statusIcon(String status) {
@@ -1588,6 +1707,73 @@ class _DetailRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _FinancialBox extends StatelessWidget {
+  final String label;
+  final double amount;
+  final Color color;
+  final IconData? icon;
+
+  const _FinancialBox({
+    required this.label,
+    required this.amount,
+    required this.color,
+    this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(
+          color: color.withValues(alpha: 0.25),
+          width: 1,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              if (icon != null) ...[
+                Icon(icon, size: 10, color: color),
+                const SizedBox(width: 3),
+              ],
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.textTertiary,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 4),
+          FittedBox(
+            fit: BoxFit.scaleDown,
+            alignment: Alignment.centerLeft,
+            child: Text(
+              '₹${amount.toStringAsFixed(amount.truncateToDouble() == amount ? 0 : 2)}',
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -10,6 +10,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:share_plus/share_plus.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_spacing.dart';
+import '../../core/utils/product_formatter.dart';
 import '../../data/models/call_log_model.dart';
 import '../../providers/call_log_providers.dart';
 import '../../providers/deleted_log_providers.dart';
@@ -80,7 +81,7 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
             l.customerName,
             l.mobile,
             l.place,
-            l.product,
+            ProductFormatter.format(l.product),
             l.connectedStatus,
             l.customerResponse,
             DateFormat('dd/MM/yyyy').format(l.nextFollowUpDate),

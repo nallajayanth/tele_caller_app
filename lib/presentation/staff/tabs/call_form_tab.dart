@@ -16,7 +16,7 @@ import '../../../providers/call_log_providers.dart';
 import '../../common/widgets/premium_button.dart';
 import '../../common/widgets/status_chip_selector.dart';
 import '../../common/widgets/success_toast.dart';
-import '../widgets/attendance_card.dart';
+// import '../widgets/attendance_card.dart';
 
 const _uuid = Uuid();
 
@@ -29,6 +29,17 @@ class CallFormTab extends ConsumerStatefulWidget {
 
 class _CallFormTabState extends ConsumerState<CallFormTab> {
   final _formKey = GlobalKey<FormState>();
+  final _scrollCtrl = ScrollController();
+  final _nameKey = GlobalKey();
+  final _mobileKey = GlobalKey();
+  final _statusKey = GlobalKey();
+  final _productKey = GlobalKey();
+  final _remarksKey = GlobalKey();
+
+  final _nameFocus = FocusNode();
+  final _mobileFocus = FocusNode();
+  final _remarksFocus = FocusNode();
+
   final _nameCtrl = TextEditingController();
   final _clinicCtrl = TextEditingController();
   final _mobileCtrl = TextEditingController();
@@ -82,6 +93,10 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
 
   @override
   void dispose() {
+    _scrollCtrl.dispose();
+    _nameFocus.dispose();
+    _mobileFocus.dispose();
+    _remarksFocus.dispose();
     _nameCtrl.dispose();
     _clinicCtrl.dispose();
     _mobileCtrl.dispose();
@@ -115,8 +130,67 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
 
   bool get isFormValid => _formKey.currentState?.validate() ?? false;
 
+  Future<void> _scrollToKey(GlobalKey key, {FocusNode? focusNode}) async {
+    final ctx = key.currentContext;
+    if (ctx != null) {
+      await Scrollable.ensureVisible(
+        ctx,
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOut,
+        alignment: 0.1,
+      );
+      if (focusNode != null) {
+        focusNode.requestFocus();
+      }
+    }
+  }
+
   Future<void> _submit() async {
-    if (!isFormValid || _selectedStatus == null) return;
+    final bool statusMissing = _selectedStatus == null;
+    if (statusMissing) {
+      setState(() => _statusError = true);
+    } else {
+      setState(() => _statusError = false);
+    }
+
+    final isValid = _formKey.currentState?.validate() ?? false;
+
+    if (!isValid || statusMissing) {
+      final nameText = _nameCtrl.text.trim();
+      final mobileText = _mobileCtrl.text.trim();
+      final remarksText = _remarksCtrl.text.trim();
+
+      if (nameText.isEmpty) {
+        await _scrollToKey(_nameKey, focusNode: _nameFocus);
+        return;
+      }
+
+      if (mobileText.isEmpty || mobileText.length != 10) {
+        await _scrollToKey(_mobileKey, focusNode: _mobileFocus);
+        return;
+      }
+
+      if (statusMissing) {
+        await _scrollToKey(_statusKey);
+        return;
+      }
+
+      if (_selectedStatus == 'Order Received') {
+        final orderVal = double.tryParse(_orderCtrl.text.replaceAll(',', '')) ?? 0.0;
+        if (_selectedProducts.isEmpty || orderVal <= 0) {
+          await _scrollToKey(_productKey);
+          _showProductPicker();
+          return;
+        }
+      }
+
+      if (_showCustomRemarksField && remarksText.isEmpty) {
+        await _scrollToKey(_remarksKey, focusNode: _remarksFocus);
+        return;
+      }
+
+      return;
+    }
 
     setState(() => _isSubmitting = true);
 
@@ -369,17 +443,20 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
     return Form(
       key: _formKey,
       child: ListView(
+        controller: _scrollCtrl,
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
         children: [
           const SizedBox(height: 12),
-          const AttendanceCard(),
-          const SizedBox(height: 16),
+          // const AttendanceCard(),
+          // const SizedBox(height: 16),
           _SectionCard(
             color: cardColor,
             title: 'Customer Info',
             icon: Icons.person_rounded,
             children: [
               _Field(
+                key: _nameKey,
+                focusNode: _nameFocus,
                 controller: _nameCtrl,
                 label: 'Customer Name *',
                 hint: 'Doctor / Retail Pharmacy',
@@ -397,6 +474,8 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
               ),
               const SizedBox(height: 14),
               _Field(
+                key: _mobileKey,
+                focusNode: _mobileFocus,
                 controller: _mobileCtrl,
                 label: 'Mobile Number *',
                 hint: '10-digit mobile',
@@ -429,6 +508,7 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
           const SizedBox(height: 14),
 
           _SectionCard(
+            key: _statusKey,
             color: cardColor,
             title: 'Call Status *',
             icon: Icons.signal_cellular_alt_rounded,
@@ -493,6 +573,7 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
           const SizedBox(height: 14),
 
           _SectionCard(
+            key: _productKey,
             color: cardColor,
             title: 'Product (Optional)',
             icon: Icons.medication_rounded,
@@ -556,6 +637,8 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
               if (_showCustomRemarksField) ...[
                 const SizedBox(height: 14),
                 _Field(
+                  key: _remarksKey,
+                  focusNode: _remarksFocus,
                   controller: _remarksCtrl,
                   label: 'Custom Remarks *',
                   hint: 'Enter your custom notes here...',
@@ -843,15 +926,10 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
   }
 
   TextEditingController _qtyCtrlFor(String name, int qty) {
-    final ctrl = _qtyCtrls.putIfAbsent(
+    return _qtyCtrls.putIfAbsent(
       name,
       () => TextEditingController(text: qty > 0 ? '$qty' : ''),
     );
-    final textVal = qty > 0 ? '$qty' : '';
-    if (ctrl.text != textVal && !FocusScope.of(context).hasFocus) {
-      ctrl.text = textVal;
-    }
-    return ctrl;
   }
 
   void _setQuantity(ProductModel product, int newQty, TextEditingController priceCtrl) {
@@ -874,15 +952,11 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
   }
 
   void _onQtyInput(ProductModel product, String text, TextEditingController priceCtrl) {
-    final val = int.tryParse(text);
+    final val = int.tryParse(text) ?? 0;
     setState(() {
-      if (val == null || val <= 0) {
-        _selections.remove(product.name);
-      } else {
-        final sel = _selections[product.name];
-        final price = sel?.price ?? (double.tryParse(priceCtrl.text) ?? 0);
-        _selections[product.name] = _ProductSelection(qty: val, price: price);
-      }
+      final sel = _selections[product.name];
+      final price = sel?.price ?? (double.tryParse(priceCtrl.text) ?? 0);
+      _selections[product.name] = _ProductSelection(qty: val, price: price);
     });
   }
 
@@ -1070,8 +1144,10 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
     }
     final displayList = _filtered ?? [];
 
-    final double runningTotal = _selections.entries
-        .fold(0, (sum, e) => sum + e.value.qty * e.value.price);
+    final activeEntries = _selections.entries.where((e) => e.value.qty > 0);
+    final int activeCount = activeEntries.length;
+    final double runningTotal = activeEntries
+        .fold(0.0, (sum, e) => sum + e.value.qty * e.value.price);
 
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
 
@@ -1136,7 +1212,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                     ],
                   ),
                 ),
-                if (_selections.isNotEmpty)
+                if (activeCount > 0)
                   Container(
                     padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                     decoration: BoxDecoration(
@@ -1144,7 +1220,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                       borderRadius: BorderRadius.circular(20),
                     ),
                     child: Text(
-                      '${_selections.length} • ₹${runningTotal.toStringAsFixed(0)}',
+                      '$activeCount • ₹${runningTotal.toStringAsFixed(0)}',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 12,
                         fontWeight: FontWeight.w600,
@@ -1247,9 +1323,9 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                         itemCount: displayList.length,
                         itemBuilder: (ctx, i) {
                           final product = displayList[i];
+                          final isSelected = _selections.containsKey(product.name);
                           final sel = _selections[product.name];
                           final qty = sel?.qty ?? 0;
-                          final isSelected = qty > 0;
                           final priceCtrl = _priceCtrlFor(product.name);
 
                       return Container(
@@ -1303,7 +1379,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                                   Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      if (qty > 0) ...[
+                                      if (isSelected) ...[
                                         _QtyButton(
                                           icon: Icons.remove_rounded,
                                           onTap: () => _setQuantity(product, qty - 1, priceCtrl),
@@ -1353,7 +1429,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                                 ],
                               ),
 
-                              // Price input — shown when qty > 0
+                              // Price input — shown when isSelected
                               if (isSelected) ...[
                                 const SizedBox(height: 8),
                                 Row(
@@ -1374,8 +1450,10 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                                         onChanged: (v) {
                                           final p = double.tryParse(v) ?? 0;
                                           setState(() {
-                                            _selections[product.name] =
-                                                sel!.copyWith(price: p);
+                                            if (sel != null) {
+                                              _selections[product.name] =
+                                                  sel.copyWith(price: p);
+                                            }
                                           });
                                         },
                                         style: GoogleFonts.plusJakartaSans(
@@ -1449,7 +1527,9 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                 width: double.infinity,
                 child: ElevatedButton(
                   onPressed: () {
-                    widget.onConfirm(_selections);
+                    final cleanSelections = Map<String, _ProductSelection>.from(_selections)
+                      ..removeWhere((key, value) => value.qty <= 0);
+                    widget.onConfirm(cleanSelections);
                     Navigator.of(context).pop();
                   },
                   style: ElevatedButton.styleFrom(
@@ -1461,9 +1541,9 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
                     elevation: 0,
                   ),
                   child: Text(
-                    _selections.isEmpty
+                    activeCount == 0
                         ? 'Confirm Selection'
-                        : 'Confirm  (${_selections.length} product${_selections.length > 1 ? 's' : ''}  •  ₹${runningTotal.toStringAsFixed(0)})',
+                        : 'Confirm  ($activeCount product${activeCount > 1 ? 's' : ''}  •  ₹${runningTotal.toStringAsFixed(0)})',
                     style: GoogleFonts.plusJakartaSans(
                         fontWeight: FontWeight.w700, fontSize: 15),
                   ),
@@ -1509,6 +1589,7 @@ class _SectionCard extends StatelessWidget {
   final List<Widget> children;
 
   const _SectionCard({
+    super.key,
     required this.color,
     required this.title,
     required this.icon,
@@ -1568,7 +1649,10 @@ class _Field extends StatelessWidget {
   final TextInputType keyboardType;
   final List<TextInputFormatter>? inputFormatters;
   final String? Function(String?)? validator;
+  final FocusNode? focusNode;
+
   const _Field({
+    super.key,
     required this.controller,
     required this.label,
     required this.hint,
@@ -1579,12 +1663,14 @@ class _Field extends StatelessWidget {
     this.keyboardType = TextInputType.text,
     this.inputFormatters,
     this.validator,
+    this.focusNode,
   });
 
   @override
   Widget build(BuildContext context) {
     return TextFormField(
       controller: controller,
+      focusNode: focusNode,
       maxLines: maxLines,
       minLines: minLines,
       readOnly: readOnly,

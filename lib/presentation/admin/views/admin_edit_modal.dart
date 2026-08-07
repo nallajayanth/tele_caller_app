@@ -148,11 +148,32 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
 
     setState(() => _isSaving = true);
 
+    String savedProductStr;
+    if (_selectedStatus == 'Order Received' && _selectedProductQuantities.isNotEmpty) {
+      final products = ref.read(productsProvider).valueOrNull ?? [];
+      final List<Map<String, dynamic>> selectedItems = [];
+      _selectedProductQuantities.forEach((prodId, qty) {
+        final p = products.firstWhere(
+          (prod) => prod.id == prodId,
+          orElse: () => ProductModel(id: prodId, name: 'Unknown', price: 0.0, stock: 0),
+        );
+        selectedItems.add({
+          'id': p.id,
+          'name': p.name,
+          'price': p.price,
+          'qty': qty,
+        });
+      });
+      savedProductStr = jsonEncode(selectedItems);
+    } else {
+      savedProductStr = _productCtrl.text.trim();
+    }
+
     final updated = widget.log.copyWith(
       customerName: _nameCtrl.text.trim(),
       mobile: _mobileCtrl.text.trim(),
       place: _placeCtrl.text.trim(),
-      product: _productCtrl.text.trim(),
+      product: savedProductStr,
       connectedStatus: _selectedStatus ?? widget.log.connectedStatus,
       customerResponse: _responseCtrl.text.trim(),
       nextFollowUpDate: _followUpDate,
@@ -572,7 +593,9 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
       });
 
       _orderCtrl.text = total.toStringAsFixed(0);
-      _productCtrl.text = selectedItems.isEmpty ? '' : jsonEncode(selectedItems);
+      _productCtrl.text = selectedItems.isEmpty
+          ? ''
+          : selectedItems.map((e) => '${e['name']} × ${e['qty']}').join(', ');
     } catch (e, stack) {
       debugPrint('Error recalculating order value: $e\n$stack');
     }
