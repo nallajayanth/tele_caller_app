@@ -16,6 +16,7 @@ import '../../common/widgets/success_toast.dart';
 import '../../../data/models/order_model.dart';
 import '../../../core/utils/product_formatter.dart';
 import '../../common/widgets/multi_image_viewer.dart';
+import '../../staff/widgets/activity_log_card.dart';
 
 
 class FollowUpFilterScreen extends ConsumerStatefulWidget {
@@ -111,32 +112,34 @@ class _FollowUpFilterScreenState extends ConsumerState<FollowUpFilterScreen> {
         logs.fold<double>(0.0, (s, l) => s + l.orderValue);
 
     return Scaffold(
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text('Follow-up Tracker',
-                style: Theme.of(context).textTheme.titleLarge),
-            Text(
-              widget.isAdmin ? 'Admin view' : 'Staff view',
-              style: GoogleFonts.plusJakartaSans(
-                  fontSize: 11,
-                  color: AppColors.textTertiary,
-                  fontWeight: FontWeight.w500),
-            ),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(
-              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              size: 22,
-            ),
-            onPressed: () => ref.read(themeModeProvider.notifier).toggle(),
-          ),
-          const SizedBox(width: 4),
-        ],
-      ),
+      appBar: widget.isAdmin
+          ? AppBar(
+              title: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('Follow-up Tracker',
+                      style: Theme.of(context).textTheme.titleLarge),
+                  Text(
+                    'Admin view',
+                    style: GoogleFonts.plusJakartaSans(
+                        fontSize: 11,
+                        color: AppColors.textTertiary,
+                        fontWeight: FontWeight.w500),
+                  ),
+                ],
+              ),
+              actions: [
+                IconButton(
+                  icon: Icon(
+                    isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                    size: 22,
+                  ),
+                  onPressed: () => ref.read(themeModeProvider.notifier).toggle(),
+                ),
+                const SizedBox(width: 4),
+              ],
+            )
+          : null,
       body: Column(
         children: [
           // ── Date navigator ──────────────────────────────────────────
@@ -290,7 +293,7 @@ class _FollowUpFilterScreenState extends ConsumerState<FollowUpFilterScreen> {
                             ),
                           );
                         }
-                        return _ReadOnlyCard(log: log, index: i);
+                        return ActivityLogCard(log: log, index: i);
                       },
                     ),
             ),

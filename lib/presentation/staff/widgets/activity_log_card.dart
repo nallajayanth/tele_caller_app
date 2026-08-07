@@ -128,7 +128,7 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
-                      if (log.orderValue > 0) ...[
+                      if (log.orderValue > 0)
                         Text(
                           '₹${_formatCurrency(log.orderValue)}',
                           style: GoogleFonts.plusJakartaSans(
@@ -137,35 +137,6 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
                             color: AppColors.accent,
                           ),
                         ),
-                        const SizedBox(height: 2),
-                        if (log.amountReceived > 0)
-                          Text(
-                            'Rec: ₹${_formatCurrency(log.amountReceived)}',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.success,
-                            ),
-                          ),
-                        if (log.amountDue > 0)
-                          Text(
-                            'Due: ₹${_formatCurrency(log.amountDue)}',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.error,
-                            ),
-                          )
-                        else if (log.amountReceived > 0 && log.amountDue <= 0)
-                          Text(
-                            'Paid ✓',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 10,
-                              fontWeight: FontWeight.w700,
-                              color: AppColors.success,
-                            ),
-                          ),
-                      ],
                       const SizedBox(height: 4),
                       AnimatedRotation(
                         turns: _expanded ? 0.5 : 0,

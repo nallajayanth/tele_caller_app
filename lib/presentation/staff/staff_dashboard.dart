@@ -175,13 +175,11 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
   }
 
   Widget _buildScaffold(bool isDark) {
+    final activeUser = ref.watch(activeUserProvider);
+    final userName = activeUser?.name;
+
     return Scaffold(
       appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Sign Out',
-          icon: const Icon(Icons.logout_rounded, size: 20),
-          onPressed: () => _confirmSignOut(context, ref),
-        ),
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -196,11 +194,13 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             Text(
-              'Staff Console',
+              userName != null && userName.trim().isNotEmpty
+                  ? 'Staff Console • $userName'
+                  : 'Staff Console',
               style: GoogleFonts.plusJakartaSans(
                 fontSize: 11,
                 color: AppColors.textTertiary,
-                fontWeight: FontWeight.w500,
+                fontWeight: FontWeight.w600,
               ),
             ),
           ],
@@ -221,11 +221,21 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
             },
           ),
           IconButton(
+            tooltip: isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode',
             icon: Icon(
               isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
               size: 22,
             ),
             onPressed: () => ref.read(themeModeProvider.notifier).toggle(),
+          ),
+          IconButton(
+            tooltip: 'Sign Out',
+            icon: const Icon(
+              Icons.logout_rounded,
+              size: 22,
+              color: AppColors.error,
+            ),
+            onPressed: () => _confirmSignOut(context, ref),
           ),
           const SizedBox(width: 4),
         ],

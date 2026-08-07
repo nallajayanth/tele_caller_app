@@ -19,6 +19,7 @@ class ActivityLogsTab extends ConsumerStatefulWidget {
 class _ActivityLogsTabState extends ConsumerState<ActivityLogsTab> {
   // null = All, 'received' = Pending, 'packed', 'dispatched'
   String? _filter;
+  DateTime? _selectedDate;
   final _searchCtrl = TextEditingController();
   String _searchQuery = '';
 
@@ -28,11 +29,44 @@ class _ActivityLogsTabState extends ConsumerState<ActivityLogsTab> {
     super.dispose();
   }
 
+  bool _isSameDay(DateTime? a, DateTime? b) {
+    if (a == null || b == null) return false;
+    return a.year == b.year && a.month == b.month && a.day == b.day;
+  }
+
+  Future<void> _pickDate(BuildContext context) async {
+    final now = DateTime.now();
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate ?? now,
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2030),
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+          colorScheme: Theme.of(ctx).colorScheme.copyWith(
+                primary: AppColors.primary,
+                onPrimary: Colors.white,
+              ),
+        ),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      setState(() => _selectedDate = picked);
+    }
+  }
+
   List<CallLogModel> _applyFilter(
     List<CallLogModel> logs,
     Map<String, String> orderStatusMap,
   ) {
     List<CallLogModel> filtered = logs;
+
+    if (_selectedDate != null) {
+      filtered = filtered.where((log) {
+        return _isSameDay(log.date, _selectedDate);
+      }).toList();
+    }
 
     if (_searchQuery.isNotEmpty) {
       final query = _searchQuery.toLowerCase().trim();
@@ -57,6 +91,10 @@ class _ActivityLogsTabState extends ConsumerState<ActivityLogsTab> {
           return status == 'packed';
         case 'dispatched':
           return status == 'dispatched';
+        case 'overdue':
+          return log.product.isNotEmpty &&
+              (status == null || status == 'received') &&
+              DateTime.now().difference(log.date).inHours >= 24;
         default:
           return true;
       }
@@ -76,54 +114,183 @@ class _ActivityLogsTabState extends ConsumerState<ActivityLogsTab> {
 
     return Column(
       children: [
-        // ── Search bar ────────────────────────────────────────────────────
+        // ── Search & Calendar Date Bar ────────────────────────────────────
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-          child: TextField(
-            controller: _searchCtrl,
-            onChanged: (val) => setState(() => _searchQuery = val),
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 14,
-              color: isDark ? Colors.white : AppColors.textPrimary,
-            ),
-            decoration: InputDecoration(
-              hintText: 'Search logs by name, phone, place...',
-              hintStyle: GoogleFonts.plusJakartaSans(
-                fontSize: 13,
-                color: AppColors.textTertiary,
-              ),
-              prefixIcon: const Icon(Icons.search_rounded, color: AppColors.textTertiary, size: 20),
-              suffixIcon: _searchQuery.isNotEmpty
-                  ? IconButton(
-                      icon: const Icon(Icons.close_rounded, color: AppColors.textTertiary, size: 18),
-                      onPressed: () {
-                        _searchCtrl.clear();
-                        setState(() => _searchQuery = '');
-                      },
-                    )
-                  : null,
-              contentPadding: const EdgeInsets.symmetric(vertical: 10, horizontal: 16),
-              filled: true,
-              fillColor: isDark ? AppColors.darkSurface : Colors.white,
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: BorderSide(
-                  color: isDark ? AppColors.borderDark : AppColors.border,
-                  width: 1,
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _searchCtrl,
+                  onChanged: (val) => setState(() => _searchQuery = val),
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 14,
+                    color: isDark ? Colors.white : AppColors.textPrimary,
+                  ),
+                  decoration: InputDecoration(
+                    hintText: 'Search logs by name, phone, place...',
+                    hintStyle: GoogleFonts.plusJakartaSans(
+                      fontSize: 13,
+                      color: AppColors.textTertiary,
+                    ),
+                    prefixIcon: const Icon(Icons.search_rounded,
+                        color: AppColors.textTertiary, size: 20),
+                    suffixIcon: _searchQuery.isNotEmpty
+                        ? IconButton(
+                            icon: const Icon(Icons.close_rounded,
+                                color: AppColors.textTertiary, size: 18),
+                            onPressed: () {
+                              _searchCtrl.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                          )
+                        : null,
+                    contentPadding: const EdgeInsets.symmetric(
+                        vertical: 10, horizontal: 16),
+                    filled: true,
+                    fillColor: isDark ? AppColors.darkSurface : Colors.white,
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: BorderSide(
+                        color: isDark ? AppColors.borderDark : AppColors.border,
+                        width: 1,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      borderSide: const BorderSide(
+                        color: AppColors.primary,
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
                 ),
               ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(
-                  color: AppColors.primary,
-                  width: 1.5,
+              const SizedBox(width: 8),
+              Material(
+                color: Colors.transparent,
+                child: InkWell(
+                  onTap: () => _pickDate(context),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: _selectedDate != null
+                          ? AppColors.primary.withValues(alpha: 0.15)
+                          : (isDark ? AppColors.darkSurface : Colors.white),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(
+                        color: _selectedDate != null
+                            ? AppColors.primary
+                            : (isDark ? AppColors.borderDark : AppColors.border),
+                        width: _selectedDate != null ? 1.5 : 1,
+                      ),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.calendar_month_rounded,
+                          size: 20,
+                          color: _selectedDate != null
+                              ? AppColors.primary
+                              : AppColors.textTertiary,
+                        ),
+                        if (_selectedDate != null) ...[
+                          const SizedBox(width: 6),
+                          Text(
+                            DateFormat('dd MMM').format(_selectedDate!),
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 12,
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
                 ),
               ),
-            ),
+            ],
           ),
         ),
 
-        // ── Filter chips ──────────────────────────────────────────────────
+        // // ── Date Presets Row ──────────────────────────────────────────────
+        // Padding(
+        //   padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
+        //   child: SingleChildScrollView(
+        //     scrollDirection: Axis.horizontal,
+        //     child: Row(
+        //       children: [
+        //         _DateChip(
+        //           label: 'All Dates',
+        //           isSelected: _selectedDate == null,
+        //           onTap: () => setState(() => _selectedDate = null),
+        //         ),
+        //         const SizedBox(width: 6),
+        //         _DateChip(
+        //           label: 'Today',
+        //           isSelected: _isSameDay(_selectedDate, DateTime.now()),
+        //           onTap: () => setState(() => _selectedDate = DateTime.now()),
+        //         ),
+        //         const SizedBox(width: 6),
+        //         _DateChip(
+        //           label: 'Yesterday',
+        //           isSelected: _isSameDay(
+        //               _selectedDate, DateTime.now().subtract(const Duration(days: 1))),
+        //           onTap: () => setState(() => _selectedDate =
+        //               DateTime.now().subtract(const Duration(days: 1))),
+        //         ),
+        //         const SizedBox(width: 6),
+        //         _DateChip(
+        //           label: _selectedDate != null &&
+        //                   !_isSameDay(_selectedDate, DateTime.now()) &&
+        //                   !_isSameDay(_selectedDate,
+        //                       DateTime.now().subtract(const Duration(days: 1)))
+        //               ? DateFormat('dd MMM yyyy').format(_selectedDate!)
+        //               : '📅 Pick Date',
+        //           isSelected: _selectedDate != null &&
+        //               !_isSameDay(_selectedDate, DateTime.now()) &&
+        //               !_isSameDay(_selectedDate,
+        //                   DateTime.now().subtract(const Duration(days: 1))),
+        //           onTap: () => _pickDate(context),
+        //         ),
+        //         if (_selectedDate != null) ...[
+        //           const SizedBox(width: 6),
+        //           GestureDetector(
+        //             onTap: () => setState(() => _selectedDate = null),
+        //             child: Container(
+        //               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+        //               decoration: BoxDecoration(
+        //                 color: AppColors.error.withValues(alpha: 0.1),
+        //                 borderRadius: BorderRadius.circular(16),
+        //               ),
+        //               child: Row(
+        //                 mainAxisSize: MainAxisSize.min,
+        //                 children: [
+        //                   const Icon(Icons.close_rounded, size: 12, color: AppColors.error),
+        //                   const SizedBox(width: 3),
+        //                   Text(
+        //                     'Clear Date',
+        //                     style: GoogleFonts.plusJakartaSans(
+        //                       fontSize: 11,
+        //                       fontWeight: FontWeight.w600,
+        //                       color: AppColors.error,
+        //                     ),
+        //                   ),
+        //                 ],
+        //               ),
+        //             ),
+        //           ),
+        //         ],
+        //       ],
+        //     ),
+        //   ),
+        // ),
+
+        // ── Order Status Filter chips ──────────────────────────────────────
         logsAsync.maybeWhen(
           data: (logs) => _FilterRow(
             selectedFilter: _filter,
@@ -134,6 +301,13 @@ class _ActivityLogsTabState extends ConsumerState<ActivityLogsTab> {
                     l.product.isNotEmpty &&
                     (orderStatusMap[l.id] == null ||
                         orderStatusMap[l.id] == 'received'))
+                .length,
+            overdueCount: logs
+                .where((l) =>
+                    l.product.isNotEmpty &&
+                    (orderStatusMap[l.id] == null ||
+                        orderStatusMap[l.id] == 'received') &&
+                    DateTime.now().difference(l.date).inHours >= 24)
                 .length,
             packedCount: logs
                 .where((l) => orderStatusMap[l.id] == 'packed')
@@ -211,8 +385,13 @@ class _ActivityLogsTabState extends ConsumerState<ActivityLogsTab> {
                     physics: const AlwaysScrollableScrollPhysics(),
                     children: [
                       SizedBox(
-                        height: MediaQuery.of(context).size.height - 280,
-                        child: _EmptyState(filter: _filter, searchQuery: _searchQuery),
+                        height: MediaQuery.of(context).size.height - 320,
+                        child: _EmptyState(
+                          filter: _filter,
+                          searchQuery: _searchQuery,
+                          selectedDate: _selectedDate,
+                          onClearDate: () => setState(() => _selectedDate = null),
+                        ),
                       ),
                     ],
                   );
@@ -312,6 +491,51 @@ class _ActivityLogsTabState extends ConsumerState<ActivityLogsTab> {
   }
 }
 
+// ─── Date Chip ───────────────────────────────────────────────────────────────
+
+class _DateChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final VoidCallback onTap;
+
+  const _DateChip({
+    required this.label,
+    required this.isSelected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+        decoration: BoxDecoration(
+          color: isSelected
+              ? AppColors.primary.withValues(alpha: 0.15)
+              : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(
+            color: isSelected
+                ? AppColors.primary
+                : AppColors.textTertiary.withValues(alpha: 0.3),
+            width: isSelected ? 1.5 : 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 11,
+            fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+            color: isSelected ? AppColors.primary : AppColors.textTertiary,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 // ─── Filter Row ───────────────────────────────────────────────────────────────
 
 class _FilterRow extends StatelessWidget {
@@ -319,6 +543,7 @@ class _FilterRow extends StatelessWidget {
   final ValueChanged<String?> onFilterChanged;
   final int allCount;
   final int pendingCount;
+  final int overdueCount;
   final int packedCount;
   final int dispatchedCount;
   final bool isDark;
@@ -328,6 +553,7 @@ class _FilterRow extends StatelessWidget {
     required this.onFilterChanged,
     required this.allCount,
     required this.pendingCount,
+    required this.overdueCount,
     required this.packedCount,
     required this.dispatchedCount,
     required this.isDark,
@@ -356,6 +582,14 @@ class _FilterRow extends StatelessWidget {
               color: const Color(0xFF3B82F6),
               isSelected: selectedFilter == 'received',
               onTap: () => onFilterChanged('received'),
+            ),
+            const SizedBox(width: 8),
+            _Chip(
+              label: 'Delayed (24h+)',
+              count: overdueCount,
+              color: AppColors.error,
+              isSelected: selectedFilter == 'overdue',
+              onTap: () => onFilterChanged('overdue'),
             ),
             const SizedBox(width: 8),
             _Chip(
@@ -450,27 +684,44 @@ class _Chip extends StatelessWidget {
 class _EmptyState extends StatelessWidget {
   final String? filter;
   final String searchQuery;
-  const _EmptyState({this.filter, this.searchQuery = ''});
+  final DateTime? selectedDate;
+  final VoidCallback? onClearDate;
+
+  const _EmptyState({
+    this.filter,
+    this.searchQuery = '',
+    this.selectedDate,
+    this.onClearDate,
+  });
 
   @override
   Widget build(BuildContext context) {
     final bool isSearching = searchQuery.isNotEmpty;
-    final String message = isSearching
-        ? 'No results found'
-        : switch (filter) {
-            'received' => 'No pending orders',
-            'packed' => 'No packed orders yet',
-            'dispatched' => 'No dispatched orders yet',
-            _ => 'No activity yet',
-          };
-    final String sub = isSearching
-        ? 'No logs match "$searchQuery".\nTry a different name, phone, or place.'
-        : switch (filter) {
-            'received' => 'Orders waiting to be packed will appear here.',
-            'packed' => 'Mark orders as packed to see them here.',
-            'dispatched' => 'Dispatched orders will appear here.',
-            _ => 'Your call logs will appear here\nonce you start logging.',
-          };
+    final bool isDateFiltered = selectedDate != null;
+
+    final String message = isDateFiltered
+        ? 'No logs on ${DateFormat('dd MMM yyyy').format(selectedDate!)}'
+        : isSearching
+            ? 'No results found'
+            : switch (filter) {
+                'received' => 'No pending orders',
+                'overdue' => 'No 24h+ delayed orders',
+                'packed' => 'No packed orders yet',
+                'dispatched' => 'No dispatched orders yet',
+                _ => 'No activity yet',
+              };
+
+    final String sub = isDateFiltered
+        ? 'Try selecting a different date or clear the date filter.'
+        : isSearching
+            ? 'No logs match "$searchQuery".\nTry a different name, phone, or place.'
+            : switch (filter) {
+                'received' => 'Orders waiting to be packed will appear here.',
+                'overdue' => 'Orders pending for over 24 hours without being packed or dispatched will appear here.',
+                'packed' => 'Mark orders as packed to see them here.',
+                'dispatched' => 'Dispatched orders will appear here.',
+                _ => 'Your call logs will appear here\nonce you start logging.',
+              };
 
     return Center(
       child: Column(
@@ -480,12 +731,21 @@ class _EmptyState extends StatelessWidget {
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: (isSearching ? AppColors.textTertiary : AppColors.primary).withValues(alpha: 0.08),
+              color: (isSearching || isDateFiltered
+                      ? AppColors.textTertiary
+                      : AppColors.primary)
+                  .withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(24),
             ),
             child: Icon(
-              isSearching ? Icons.search_off_rounded : Icons.timeline_rounded,
-              color: isSearching ? AppColors.textTertiary : AppColors.primary,
+              isDateFiltered
+                  ? Icons.calendar_today_rounded
+                  : (isSearching
+                      ? Icons.search_off_rounded
+                      : Icons.timeline_rounded),
+              color: isSearching || isDateFiltered
+                  ? AppColors.textTertiary
+                  : AppColors.primary,
               size: 40,
             ),
           ).animate().scale(duration: 400.ms, curve: Curves.elasticOut),
@@ -507,6 +767,20 @@ class _EmptyState extends StatelessWidget {
               color: AppColors.textTertiary,
             ),
           ).animate().fadeIn(delay: 300.ms),
+          if (isDateFiltered && onClearDate != null) ...[
+            const SizedBox(height: 16),
+            TextButton.icon(
+              onPressed: onClearDate,
+              icon: const Icon(Icons.refresh_rounded, size: 16),
+              label: Text(
+                'Show All Dates',
+                style: GoogleFonts.plusJakartaSans(
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
