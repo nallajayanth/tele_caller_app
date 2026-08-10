@@ -58,25 +58,36 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
     }
   }
 
-  Future<bool> startDuty({String? selfieUrl}) async {
-    if (_userPhone == null || _userPhone.isEmpty) return false;
+  Future<bool> startDuty({
+    String? phone,
+    String? name,
+    String? deviceId,
+    String? selfieUrl,
+    Position? position,
+  }) async {
+    final targetPhone = phone ?? _userPhone;
+    final targetName = name ?? _userName ?? 'Staff Member';
+    final targetDeviceId = deviceId ?? _deviceId;
+    if (targetPhone == null || targetPhone.isEmpty) return false;
 
     try {
       state = const AsyncValue.loading();
       
-      // Prompt OS location permission dialog if denied
-      await LocationPermissionHelper.checkAndRequestPermission();
+      Position? pos = position;
+      if (pos == null) {
+        // Prompt OS location permission dialog if denied
+        await LocationPermissionHelper.checkAndRequestPermission();
 
-      Position? position;
-      try {
-        position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 10),
-        );
-      } catch (_) {
         try {
-          position = await Geolocator.getLastKnownPosition();
-        } catch (_) {}
+          pos = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+            timeLimit: const Duration(seconds: 10),
+          );
+        } catch (_) {
+          try {
+            pos = await Geolocator.getLastKnownPosition();
+          } catch (_) {}
+        }
       }
 
       int batteryLevel = 100;
@@ -94,19 +105,19 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
 
       final now = DateTime.now();
       final todayStr = DateFormat('yyyy-MM-dd').format(now);
-      final docId = '${_userPhone}_$todayStr';
+      final docId = '${targetPhone}_$todayStr';
 
       final newAttendance = AttendanceModel(
         id: docId,
-        staffPhone: _userPhone,
-        staffName: _userName ?? 'Staff Member',
+        staffPhone: targetPhone,
+        staffName: targetName,
         date: todayStr,
         startTime: now,
-        startLatitude: position?.latitude ?? 0.0,
-        startLongitude: position?.longitude ?? 0.0,
+        startLatitude: pos?.latitude ?? 0.0,
+        startLongitude: pos?.longitude ?? 0.0,
         startBattery: batteryLevel,
         startNetwork: networkStatus,
-        deviceId: _deviceId,
+        deviceId: targetDeviceId,
         startSelfieUrl: selfieUrl,
         isActive: true,
       );
@@ -122,8 +133,8 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
         await service.startService();
       }
       service.invoke('initTask', {
-        'phoneNumber': _userPhone,
-        'name': _userName,
+        'phoneNumber': targetPhone,
+        'name': targetName,
       });
 
       state = AsyncValue.data(newAttendance);

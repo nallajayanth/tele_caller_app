@@ -32,7 +32,7 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
     }
   }
 
-  Future<bool> login(String phoneNumber, String pin) async {
+  Future<TelecallerModel?> validateCredentials(String phoneNumber, String pin) async {
     try {
       final client = FirebaseFirestore.instance;
       final cleanPhone = phoneNumber.replaceAll(RegExp(r'\D'), '');
@@ -42,36 +42,41 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
           .collection('telecallers')
           .doc(queryPhone)
           .get();
-      if (!doc.exists || doc.data() == null) return false;
+      if (!doc.exists || doc.data() == null) return null;
 
       final telecaller = TelecallerModel.fromJson(doc.data()!);
-      bool isPinValid = false;
       if (pin == telecaller.pin) {
-        isPinValid = true;
+        return telecaller;
       }
-
-      if (isPinValid) {
-        final box = Hive.box('settings');
-        final secureBox = Hive.box('secure_settings');
-        // Save session in Hive secure settings
-        await secureBox.put(_sessionKey, telecaller.toJson());
-        
-        // Update device_id to a valid UUID-syntax based on the logged-in staff's phone number!
-        final formattedDeviceId = phoneNumber.length == 10 
-            ? '00000000-0000-0000-0000-${phoneNumber.padLeft(12, '0')}'
-            : phoneNumber;
-        await box.put('device_id', formattedDeviceId);
-        
-        // Register FCM push token for this device
-        await FCMService.instance.registerUserToken(phoneNumber);
-
-        state = telecaller;
-        return true;
-      }
-      return false;
+      return null;
     } catch (_) {
-      return false;
+      return null;
     }
+  }
+
+  Future<void> setUserSession(TelecallerModel telecaller) async {
+    final box = Hive.box('settings');
+    final secureBox = Hive.box('secure_settings');
+    await secureBox.put(_sessionKey, telecaller.toJson());
+    
+    final phoneNumber = telecaller.phoneNumber;
+    final formattedDeviceId = phoneNumber.length == 10 
+        ? '00000000-0000-0000-0000-${phoneNumber.padLeft(12, '0')}'
+        : phoneNumber;
+    await box.put('device_id', formattedDeviceId);
+    
+    await FCMService.instance.registerUserToken(phoneNumber);
+
+    state = telecaller;
+  }
+
+  Future<bool> login(String phoneNumber, String pin) async {
+    final telecaller = await validateCredentials(phoneNumber, pin);
+    if (telecaller != null) {
+      await setUserSession(telecaller);
+      return true;
+    }
+    return false;
   }
 
   Future<void> signOut() async {

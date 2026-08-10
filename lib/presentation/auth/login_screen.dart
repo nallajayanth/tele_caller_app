@@ -15,7 +15,6 @@ import '../../providers/call_log_providers.dart';
 import '../../providers/attendance_providers.dart';
 import '../../core/services/location_permission_helper.dart';
 import '../common/widgets/premium_button.dart';
-import '../common/widgets/success_toast.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -43,11 +42,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   void _triggerError() {
     HapticFeedback.vibrate();
-    setState(() {
-      _shakeTrigger++;
-      _isLoading = false;
-      _loadingMsg = '';
-    });
+    if (mounted) {
+      setState(() {
+        _shakeTrigger++;
+        _isLoading = false;
+        _loadingMsg = '';
+      });
+    }
   }
 
   Future<void> _submit() async {
@@ -56,19 +57,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
 
-    setState(() {
-      _isLoading = true;
-      _loadingMsg = 'Authenticating...';
-    });
+    if (mounted) {
+      setState(() {
+        _isLoading = true;
+        _loadingMsg = 'Authenticating...';
+      });
+    }
     HapticFeedback.lightImpact();
 
     final phone = _phoneCtrl.text.trim();
     final pin = _pinCtrl.text.trim();
 
     try {
-      // Step 1: Validate credentials first
-      final success = await ref.read(activeUserProvider.notifier).login(phone, pin);
-      if (!success) {
+      // Step 1: Validate credentials first without switching screen state
+      final user = await ref.read(activeUserProvider.notifier).validateCredentials(phone, pin);
+      if (user == null) {
         _triggerError();
         if (mounted) {
           ScaffoldMessenger.of(context).showSnackBar(
@@ -86,11 +89,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         return;
       }
 
-      // Step 2: For Field Staff, enforce location & selfie capture immediately
-      final user = ref.read(activeUserProvider);
-      if (user != null && user.role == 'staff') {
+      // Step 2: For Field Staff, enforce location & selfie capture while LoginScreen is still mounted
+      if (user.role == 'staff') {
         // A. Verify and capture GPS coordinates
-        setState(() => _loadingMsg = 'Verifying GPS...');
+        if (mounted) setState(() => _loadingMsg = 'Verifying GPS...');
         Position? position;
         try {
           await LocationPermissionHelper.checkAndRequestPermission();
@@ -103,13 +105,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
             position = await Geolocator.getLastKnownPosition();
           } catch (_) {}
           if (position == null) {
-            await ref.read(activeUserProvider.notifier).signOut();
             throw Exception('Location (GPS) is required to start your duty shift and log in.');
           }
         }
 
         // B. Capture Front Camera Selfie
-        setState(() => _loadingMsg = 'Taking selfie...');
+        if (mounted) setState(() => _loadingMsg = 'Taking selfie...');
         final picker = ImagePicker();
         final picked = await picker.pickImage(
           source: ImageSource.camera,
@@ -119,12 +120,11 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         );
 
         if (picked == null) {
-          await ref.read(activeUserProvider.notifier).signOut();
           throw Exception('Selfie verification is required to start your duty shift and log in.');
         }
 
         // C. Upload Selfie image to Storage
-        setState(() => _loadingMsg = 'Uploading selfie...');
+        if (mounted) setState(() => _loadingMsg = 'Uploading selfie...');
         final file = File(picked.path);
         final timestamp = DateTime.now().millisecondsSinceEpoch;
         final storageRef = FirebaseStorage.instance
@@ -136,13 +136,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         final selfieUrl = await snapshot.ref.getDownloadURL();
 
         // D. Create/Start Duty shift record
-        setState(() => _loadingMsg = 'Clocking in...');
+        if (mounted) setState(() => _loadingMsg = 'Clocking in...');
+        final formattedDeviceId = phone.length == 10 
+            ? '00000000-0000-0000-0000-${phone.padLeft(12, '0')}'
+            : phone;
         final attendanceRef = ref.read(activeAttendanceProvider.notifier);
-        await attendanceRef.loadTodayAttendance();
         
-        final dutyStarted = await attendanceRef.startDuty(selfieUrl: selfieUrl);
+        final dutyStarted = await attendanceRef.startDuty(
+          phone: phone,
+          name: user.name,
+          deviceId: formattedDeviceId,
+          selfieUrl: selfieUrl,
+          position: position,
+        );
         if (!dutyStarted) {
-          await ref.read(activeUserProvider.notifier).signOut();
           throw Exception('Failed to initialize attendance tracking. Please try again.');
         }
       }
@@ -150,13 +157,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       // Step 3: Populate Call Logs
       await ref.read(callLogsProvider.notifier).loadLogs();
 
-      if (!mounted) return;
+      // Step 4: Now set user session (navigates to dashboard)
+      await ref.read(activeUserProvider.notifier).setUserSession(user);
+
       HapticFeedback.heavyImpact();
-      SuccessToast.show(
-        context,
-        message: 'Welcome, ${user?.name ?? 'Staff'}!',
-        icon: Icons.verified_user_rounded,
-      );
     } catch (e) {
       _triggerError();
       if (mounted) {
