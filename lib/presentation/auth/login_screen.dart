@@ -1,13 +1,19 @@
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:firebase_storage/firebase_storage.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_spacing.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/call_log_providers.dart';
+import '../../providers/attendance_providers.dart';
+import '../../core/services/location_permission_helper.dart';
 import '../common/widgets/premium_button.dart';
 import '../common/widgets/success_toast.dart';
 
@@ -25,6 +31,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   bool _obscurePin = true;
   bool _isLoading = false;
+  String _loadingMsg = '';
   int _shakeTrigger = 0;
 
   @override
@@ -39,6 +46,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     setState(() {
       _shakeTrigger++;
       _isLoading = false;
+      _loadingMsg = '';
     });
   }
 
@@ -48,21 +56,114 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
       return;
     }
 
-    setState(() => _isLoading = true);
+    setState(() {
+      _isLoading = true;
+      _loadingMsg = 'Authenticating...';
+    });
     HapticFeedback.lightImpact();
 
     final phone = _phoneCtrl.text.trim();
     final pin = _pinCtrl.text.trim();
 
-    final success = await ref.read(activeUserProvider.notifier).login(phone, pin);
+    try {
+      // Step 1: Validate credentials first
+      final success = await ref.read(activeUserProvider.notifier).login(phone, pin);
+      if (!success) {
+        _triggerError();
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(
+                'Invalid credentials. Access denied.',
+                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+              ),
+              backgroundColor: AppColors.error,
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+          );
+        }
+        return;
+      }
 
-    if (!success) {
+      // Step 2: For Field Staff, enforce location & selfie capture immediately
+      final user = ref.read(activeUserProvider);
+      if (user != null && user.role == 'staff') {
+        // A. Verify and capture GPS coordinates
+        setState(() => _loadingMsg = 'Verifying GPS...');
+        Position? position;
+        try {
+          await LocationPermissionHelper.checkAndRequestPermission();
+          position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+            timeLimit: const Duration(seconds: 12),
+          );
+        } catch (e) {
+          try {
+            position = await Geolocator.getLastKnownPosition();
+          } catch (_) {}
+          if (position == null) {
+            await ref.read(activeUserProvider.notifier).signOut();
+            throw Exception('Location (GPS) is required to start your duty shift and log in.');
+          }
+        }
+
+        // B. Capture Front Camera Selfie
+        setState(() => _loadingMsg = 'Taking selfie...');
+        final picker = ImagePicker();
+        final picked = await picker.pickImage(
+          source: ImageSource.camera,
+          preferredCameraDevice: CameraDevice.front,
+          maxWidth: 800,
+          imageQuality: 85,
+        );
+
+        if (picked == null) {
+          await ref.read(activeUserProvider.notifier).signOut();
+          throw Exception('Selfie verification is required to start your duty shift and log in.');
+        }
+
+        // C. Upload Selfie image to Storage
+        setState(() => _loadingMsg = 'Uploading selfie...');
+        final file = File(picked.path);
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final storageRef = FirebaseStorage.instance
+            .ref()
+            .child('attendance_selfies/selfie_${phone}_$timestamp.jpg');
+
+        final uploadTask = storageRef.putFile(file);
+        final snapshot = await uploadTask;
+        final selfieUrl = await snapshot.ref.getDownloadURL();
+
+        // D. Create/Start Duty shift record
+        setState(() => _loadingMsg = 'Clocking in...');
+        final attendanceRef = ref.read(activeAttendanceProvider.notifier);
+        await attendanceRef.loadTodayAttendance();
+        
+        final dutyStarted = await attendanceRef.startDuty(selfieUrl: selfieUrl);
+        if (!dutyStarted) {
+          await ref.read(activeUserProvider.notifier).signOut();
+          throw Exception('Failed to initialize attendance tracking. Please try again.');
+        }
+      }
+
+      // Step 3: Populate Call Logs
+      await ref.read(callLogsProvider.notifier).loadLogs();
+
+      if (!mounted) return;
+      HapticFeedback.heavyImpact();
+      SuccessToast.show(
+        context,
+        message: 'Welcome, ${user?.name ?? 'Staff'}!',
+        icon: Icons.verified_user_rounded,
+      );
+    } catch (e) {
       _triggerError();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(
-              'Invalid credentials. Access denied.',
+              e.toString().replaceAll('Exception:', '').trim(),
               style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
             ),
             backgroundColor: AppColors.error,
@@ -71,26 +172,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
           ),
         );
       }
-      return;
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _loadingMsg = '';
+        });
+      }
     }
-
-    // Force call logs provider to reload using new device ID / phone context
-    await ref.read(callLogsProvider.notifier).loadLogs();
-
-    if (!mounted) return;
-
-    final user = ref.read(activeUserProvider);
-    if (user == null) {
-      _triggerError();
-      return;
-    }
-
-    HapticFeedback.heavyImpact();
-    SuccessToast.show(
-      context,
-      message: 'Welcome, ${user.name}!',
-      icon: Icons.verified_user_rounded,
-    );
   }
 
   @override
@@ -343,7 +432,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 ),
                 const SizedBox(height: 28),
                 PremiumButton(
-                  label: 'Sign In',
+                  label: _isLoading && _loadingMsg.isNotEmpty ? _loadingMsg : 'Sign In',
                   isLoading: _isLoading,
                   onTap: _isLoading ? null : _submit,
                   icon: const Icon(Icons.login_rounded, color: Colors.white, size: 18),

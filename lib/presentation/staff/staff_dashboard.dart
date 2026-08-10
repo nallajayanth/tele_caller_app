@@ -13,6 +13,7 @@ import 'tabs/call_form_tab.dart';
 import 'tabs/activity_logs_tab.dart';
 import 'tabs/performance_tab.dart';
 import '../../providers/location_providers.dart';
+import '../../providers/attendance_providers.dart';
 
 class StaffDashboard extends ConsumerStatefulWidget {
   const StaffDashboard({super.key});
@@ -94,6 +95,16 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
   Widget build(BuildContext context) {
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     
+    final attendanceAsync = ref.watch(activeAttendanceProvider);
+    attendanceAsync.whenData((attendance) {
+      if (attendance == null) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          ref.read(activeUserProvider.notifier).signOut();
+          ref.read(callLogsProvider.notifier).loadLogs();
+        });
+      }
+    });
+
     // Check Operational Lock: on the 1st of the month, target must be set.
     final targetAsync = ref.watch(staffMonthlyTargetProvider);
     final isFirstOfMonth = DateTime.now().day == 1;

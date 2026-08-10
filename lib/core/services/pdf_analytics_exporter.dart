@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:intl/intl.dart';
 import 'package:path_provider/path_provider.dart';
@@ -176,7 +177,7 @@ class PdfAnalyticsExporter {
                   l.customerName,
                   l.mobile,
                   l.connectedStatus,
-                  l.product.isNotEmpty ? l.product : '-',
+                  _formatProductString(l.product),
                   l.orderValue > 0 ? fmtCurr.format(l.orderValue) : '-',
                 ];
               }).toList(),
@@ -242,5 +243,28 @@ class PdfAnalyticsExporter {
         ),
       ),
     );
+  }
+
+  static String _formatProductString(String raw) {
+    if (raw.isEmpty) return '-';
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        final items = decoded.map((e) {
+          if (e is Map) {
+            final name = (e['product_name'] ?? e['name'] ?? 'Product').toString();
+            final qty = e['qty'] ?? e['quantity'] ?? 1;
+            return '$name (x$qty)';
+          }
+          return e.toString();
+        }).toList();
+        return items.join(', ');
+      } else if (decoded is Map) {
+        final name = (decoded['product_name'] ?? decoded['name'] ?? 'Product').toString();
+        final qty = decoded['qty'] ?? decoded['quantity'] ?? 1;
+        return '$name (x$qty)';
+      }
+    } catch (_) {}
+    return raw;
   }
 }

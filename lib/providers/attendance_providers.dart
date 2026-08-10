@@ -1,9 +1,11 @@
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:battery_plus/battery_plus.dart';
 import '../data/models/attendance_model.dart';
 import '../core/services/location_permission_helper.dart';
 import 'auth_providers.dart';
@@ -77,6 +79,19 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
         } catch (_) {}
       }
 
+      int batteryLevel = 100;
+      try {
+        batteryLevel = await Battery().batteryLevel;
+      } catch (_) {}
+
+      String networkStatus = 'Disconnected';
+      try {
+        final lookup = await InternetAddress.lookup('example.com');
+        if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) {
+          networkStatus = 'Connected';
+        }
+      } catch (_) {}
+
       final now = DateTime.now();
       final todayStr = DateFormat('yyyy-MM-dd').format(now);
       final docId = '${_userPhone}_$todayStr';
@@ -89,8 +104,8 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
         startTime: now,
         startLatitude: position?.latitude ?? 0.0,
         startLongitude: position?.longitude ?? 0.0,
-        startBattery: 100,
-        startNetwork: 'Online',
+        startBattery: batteryLevel,
+        startNetwork: networkStatus,
         deviceId: _deviceId,
         startSelfieUrl: selfieUrl,
         isActive: true,
@@ -139,6 +154,19 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
         } catch (_) {}
       }
 
+      int batteryLevel = 100;
+      try {
+        batteryLevel = await Battery().batteryLevel;
+      } catch (_) {}
+
+      String networkStatus = 'Disconnected';
+      try {
+        final lookup = await InternetAddress.lookup('example.com');
+        if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) {
+          networkStatus = 'Connected';
+        }
+      } catch (_) {}
+
       final now = DateTime.now();
       final diffMinutes = now.difference(current.startTime).inMinutes;
 
@@ -146,8 +174,8 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
         endTime: now,
         endLatitude: position?.latitude ?? current.startLatitude,
         endLongitude: position?.longitude ?? current.startLongitude,
-        endBattery: 100,
-        endNetwork: 'Online',
+        endBattery: batteryLevel,
+        endNetwork: networkStatus,
         totalWorkingMinutes: diffMinutes > 0 ? diffMinutes : 0,
         isActive: false,
       );

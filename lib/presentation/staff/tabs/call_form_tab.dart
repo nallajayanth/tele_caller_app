@@ -16,7 +16,8 @@ import '../../../providers/call_log_providers.dart';
 import '../../common/widgets/premium_button.dart';
 import '../../common/widgets/status_chip_selector.dart';
 import '../../common/widgets/success_toast.dart';
-// import '../widgets/attendance_card.dart';
+import '../widgets/attendance_card.dart';
+import '../../../providers/attendance_providers.dart';
 
 const _uuid = Uuid();
 
@@ -435,10 +436,102 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
     );
   }
 
+  Widget _buildBlocker(BuildContext context, bool isDark, Color cardColor) {
+    return Container(
+      margin: const EdgeInsets.only(top: 10),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: cardColor,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: isDark ? AppColors.borderDark : AppColors.border,
+        ),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 12),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(
+              Icons.lock_person_rounded,
+              color: AppColors.primary,
+              size: 40,
+            ),
+          ),
+          const SizedBox(height: 20),
+          Text(
+            'Duty Shift Not Started',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+              color: isDark ? Colors.white : AppColors.textPrimary,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 12),
+          Text(
+            'To comply with attendance tracking regulations, please start your shift first. Starting your shift will verify your attendance with your selfie, device diagnostics, and location coordinates.',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              height: 1.5,
+              color: isDark ? Colors.white70 : AppColors.textSecondary,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.check_circle_outline_rounded, color: AppColors.success, size: 16),
+              const SizedBox(width: 8),
+              Text(
+                'Selfie Verification',
+                style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textTertiary),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.check_circle_outline_rounded, color: AppColors.success, size: 16),
+              const SizedBox(width: 8),
+              Text(
+                'GPS Location Tracking',
+                style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textTertiary),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.check_circle_outline_rounded, color: AppColors.success, size: 16),
+              const SizedBox(width: 8),
+              Text(
+                'Battery & Connection Logs',
+                style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600, color: AppColors.textTertiary),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+        ],
+      ),
+    ).animate().fadeIn(duration: 400.ms).scale(begin: const Offset(0.95, 0.95));
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
+    final attendanceAsync = ref.watch(activeAttendanceProvider);
+    final attendance = attendanceAsync.valueOrNull;
+    final isShiftActive = attendance != null && attendance.isActive;
 
     return Form(
       key: _formKey,
@@ -447,9 +540,12 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 120),
         children: [
           const SizedBox(height: 12),
-          // const AttendanceCard(),
-          // const SizedBox(height: 16),
-          _SectionCard(
+          const AttendanceCard(),
+          const SizedBox(height: 16),
+          if (!isShiftActive) ...[
+            _buildBlocker(context, isDark, cardColor),
+          ] else ...[
+            _SectionCard(
             color: cardColor,
             title: 'Customer Info',
             icon: Icons.person_rounded,
@@ -843,6 +939,7 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
             onTap: _isSubmitting ? null : _submit,
             icon: const Icon(Icons.save_rounded, color: Colors.white, size: 20),
           ).animate().fadeIn(delay: 320.ms).slideY(begin: 0.2),
+          ],
         ],
       ),
     );

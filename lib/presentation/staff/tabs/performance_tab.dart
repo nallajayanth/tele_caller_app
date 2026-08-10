@@ -498,42 +498,6 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
           ),
           const SizedBox(height: 20),
 
-          // ── Download PDF Analytics Button ─────────────────────────────
-          SizedBox(
-            width: double.infinity,
-            child: OutlinedButton.icon(
-              onPressed: _isExporting ? null : onDownloadPdf,
-              style: OutlinedButton.styleFrom(
-                padding: const EdgeInsets.symmetric(vertical: 12),
-                side: BorderSide(
-                  color: AppColors.primary.withValues(alpha: 0.5),
-                  width: 1.5,
-                ),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(14),
-                ),
-              ),
-              icon: _isExporting
-                  ? const SizedBox(
-                      width: 16,
-                      height: 16,
-                      child: CircularProgressIndicator(
-                          strokeWidth: 2, color: AppColors.primary),
-                    )
-                  : const Icon(Icons.picture_as_pdf_rounded,
-                      color: AppColors.primary, size: 18),
-              label: Text(
-                _isExporting
-                    ? 'Generating PDF Report...'
-                    : 'Download PDF Analytics Report',
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.primary,
-                ),
-              ),
-            ),
-          ),
         ],
       ),
     );
