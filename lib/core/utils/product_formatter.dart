@@ -7,7 +7,16 @@ class ProductFormatter {
   static String format(String? product, {bool singleLine = true}) {
     if (product == null || product.trim().isEmpty) return '';
 
-    final trimmed = product.trim();
+    var trimmed = product.trim();
+    if (trimmed.startsWith('"') && trimmed.endsWith('"')) {
+      try {
+        final decoded = jsonDecode(trimmed);
+        if (decoded is String) {
+          trimmed = decoded.trim();
+        }
+      } catch (_) {}
+    }
+
     if (trimmed.startsWith('[') || trimmed.startsWith('{')) {
       try {
         final decoded = jsonDecode(trimmed);

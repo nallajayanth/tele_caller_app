@@ -30,6 +30,55 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
   }
 
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    final attendance = ref.read(activeAttendanceProvider).value;
+    final isActive = attendance != null && attendance.isActive;
+
+    if (isActive) {
+      showDialog(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppSpacing.dialogRadius)),
+          icon: Container(
+            padding: const EdgeInsets.all(12),
+            decoration: BoxDecoration(
+              color: AppColors.error.withValues(alpha: 0.1),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.warning_amber_rounded,
+                color: AppColors.error, size: 28),
+          ),
+          title: Text(
+            'Active Shift Running',
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
+            textAlign: TextAlign.center,
+          ),
+          content: Text(
+            'Please end your duty shift on the dashboard before signing out.',
+            style: GoogleFonts.plusJakartaSans(fontSize: 14, height: 1.5),
+            textAlign: TextAlign.center,
+          ),
+          actionsAlignment: MainAxisAlignment.center,
+          actions: [
+            ElevatedButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10)),
+              ),
+              child: Text(
+                'OK',
+                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+              ),
+            ),
+          ],
+        ),
+      );
+      return;
+    }
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(

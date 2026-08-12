@@ -12,7 +12,7 @@ import '../../../core/constants/app_spacing.dart';
 import '../../../core/services/location_permission_helper.dart';
 import '../../../providers/attendance_providers.dart';
 import '../../../providers/auth_providers.dart';
-import '../../../providers/call_log_providers.dart';
+
 import '../../common/widgets/success_toast.dart';
 
 class AttendanceCard extends ConsumerStatefulWidget {
@@ -197,8 +197,6 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
             message: 'Duty Shift Ended. Excellent work today!',
             icon: Icons.check_circle_rounded,
           );
-          ref.read(activeUserProvider.notifier).signOut();
-          ref.read(callLogsProvider.notifier).loadLogs();
         }
       }
     }
