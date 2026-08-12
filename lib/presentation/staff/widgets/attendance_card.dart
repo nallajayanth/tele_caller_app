@@ -27,62 +27,83 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
   String _loadingMessage = '';
 
   Future<void> _handleStartDuty() async {
+    final activeUser = ref.read(activeUserProvider);
+    final isField = activeUser != null && activeUser.role == 'staff' && activeUser.isFieldStaff;
+
     try {
       setState(() {
         _isProcessing = true;
-        _loadingMessage = 'Checking GPS...';
+        _loadingMessage = isField ? 'Checking GPS...' : 'Starting Shift...';
       });
       HapticFeedback.mediumImpact();
 
-      // Check/request location permissions first
-      await LocationPermissionHelper.checkAndRequestPermission();
+      String? selfieUrl;
 
-      setState(() {
-        _loadingMessage = 'Taking Selfie...';
-      });
-
-      final picker = ImagePicker();
-      final picked = await picker.pickImage(
-        source: ImageSource.camera,
-        preferredCameraDevice: CameraDevice.front,
-        maxWidth: 600,
-        maxHeight: 600,
-        imageQuality: 70,
-      );
-
-      if (picked == null) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Selfie capture is mandatory to start duty shift.'),
-              backgroundColor: AppColors.error,
-            ),
-          );
+      if (isField) {
+        // Check/request location permissions first
+        final permissionGranted = await LocationPermissionHelper.checkAndRequestPermission();
+        if (!permissionGranted) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Location permission is required to start your duty shift.'),
+                backgroundColor: AppColors.error,
+              ),
+            );
+          }
+          setState(() {
+            _isProcessing = false;
+            _loadingMessage = '';
+          });
+          return;
         }
+
         setState(() {
-          _isProcessing = false;
-          _loadingMessage = '';
+          _loadingMessage = 'Taking Selfie...';
         });
-        return;
+
+        final picker = ImagePicker();
+        final picked = await picker.pickImage(
+          source: ImageSource.camera,
+          preferredCameraDevice: CameraDevice.front,
+          maxWidth: 600,
+          maxHeight: 600,
+          imageQuality: 70,
+        );
+
+        if (picked == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Selfie capture is mandatory to start duty shift.'),
+                backgroundColor: AppColors.error,
+              ),
+            );
+          }
+          setState(() {
+            _isProcessing = false;
+            _loadingMessage = '';
+          });
+          return;
+        }
+
+        setState(() {
+          _loadingMessage = 'Uploading Selfie...';
+        });
+
+        final file = File(picked.path);
+        final timestamp = DateTime.now().millisecondsSinceEpoch;
+        final fileName = 'selfie_${activeUser.phoneNumber}_$timestamp.jpg';
+        final storageRef = FirebaseStorage.instance.ref().child('attendance_selfies/$fileName');
+        
+        final uploadTask = storageRef.putFile(file);
+        final snapshot = await uploadTask;
+        selfieUrl = await snapshot.ref.getDownloadURL();
+
+        setState(() {
+          _loadingMessage = 'Starting Shift...';
+        });
       }
-
-      setState(() {
-        _loadingMessage = 'Uploading Selfie...';
-      });
-
-      final file = File(picked.path);
-      final activeUser = ref.read(activeUserProvider);
-      final timestamp = DateTime.now().millisecondsSinceEpoch;
-      final fileName = 'selfie_${activeUser?.phoneNumber ?? "unknown"}_$timestamp.jpg';
-      final storageRef = FirebaseStorage.instance.ref().child('attendance_selfies/$fileName');
-      
-      final uploadTask = storageRef.putFile(file);
-      final snapshot = await uploadTask;
-      final selfieUrl = await snapshot.ref.getDownloadURL();
-
-      setState(() {
-        _loadingMessage = 'Starting Shift...';
-      });
 
       final success = await ref.read(activeAttendanceProvider.notifier).startDuty(selfieUrl: selfieUrl);
       if (mounted) {
@@ -93,13 +114,17 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
         if (success) {
           SuccessToast.show(
             context,
-            message: 'Duty Shift Started! GPS Tracking Active.',
+            message: isField 
+                ? 'Duty Shift Started! GPS Tracking Active.'
+                : 'Duty Shift Started!',
             icon: Icons.play_arrow_rounded,
           );
         } else {
           ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Failed to start duty. Please check GPS/permissions.'),
+            SnackBar(
+              content: Text(isField
+                  ? 'Failed to start duty. Please check GPS/permissions.'
+                  : 'Failed to start duty. Please try again.'),
               backgroundColor: AppColors.error,
             ),
           );
@@ -123,6 +148,9 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
   }
 
   Future<void> _confirmEndDuty() async {
+    final activeUser = ref.read(activeUserProvider);
+    final isField = activeUser != null && activeUser.role == 'staff' && activeUser.isFieldStaff;
+
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
@@ -131,7 +159,9 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
           style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold),
         ),
         content: Text(
-          'Ending your duty shift will stop background GPS location sharing for the day.',
+          isField
+              ? 'Ending your duty shift will stop background GPS location sharing for the day.'
+              : 'Are you sure you want to end your work shift for today?',
           style: GoogleFonts.plusJakartaSans(),
         ),
         actions: [
@@ -204,6 +234,8 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
   @override
   Widget build(BuildContext context) {
     final attendanceAsync = ref.watch(activeAttendanceProvider);
+    final activeUser = ref.watch(activeUserProvider);
+    final isField = activeUser != null && activeUser.role == 'staff' && activeUser.isFieldStaff;
 
     return attendanceAsync.when(
       loading: () => Container(
@@ -328,87 +360,104 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
                   ),
                   const SizedBox(height: 14),
                   if (isActive) ...[
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        if (attendance.startSelfieUrl != null)
-                          GestureDetector(
-                            onTap: () => _showImageDialog(context, attendance.startSelfieUrl!),
-                            child: Hero(
-                              tag: 'attendance_selfie',
-                              child: Container(
-                                width: 70,
-                                height: 70,
-                                decoration: BoxDecoration(
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.white24, width: 1.5),
-                                  image: DecorationImage(
-                                    image: NetworkImage(attendance.startSelfieUrl!),
-                                    fit: BoxFit.cover,
+                    if (isField) ...[
+                      Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          if (attendance.startSelfieUrl != null)
+                            GestureDetector(
+                              onTap: () => _showImageDialog(context, attendance.startSelfieUrl!),
+                              child: Hero(
+                                tag: 'attendance_selfie',
+                                child: Container(
+                                  width: 70,
+                                  height: 70,
+                                  decoration: BoxDecoration(
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: Border.all(color: Colors.white24, width: 1.5),
+                                    image: DecorationImage(
+                                      image: NetworkImage(attendance.startSelfieUrl!),
+                                      fit: BoxFit.cover,
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
-                          ),
-                        if (attendance.startSelfieUrl != null) const SizedBox(width: 14),
-                        Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  const Icon(Icons.my_location_rounded, color: AppColors.accent, size: 14),
-                                  const SizedBox(width: 6),
-                                  Expanded(
-                                    child: Text(
-                                      'GPS: ${attendance.startLatitude.toStringAsFixed(4)}, ${attendance.startLongitude.toStringAsFixed(4)}',
-                                      style: GoogleFonts.plusJakartaSans(
-                                        fontSize: 12,
-                                        color: Colors.white.withValues(alpha: 0.9),
-                                        fontWeight: FontWeight.w500,
+                          if (attendance.startSelfieUrl != null) const SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    const Icon(Icons.my_location_rounded, color: AppColors.accent, size: 14),
+                                    const SizedBox(width: 6),
+                                    Expanded(
+                                      child: Text(
+                                        'GPS: ${attendance.startLatitude.toStringAsFixed(4)}, ${attendance.startLongitude.toStringAsFixed(4)}',
+                                        style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 12,
+                                          color: Colors.white.withValues(alpha: 0.9),
+                                          fontWeight: FontWeight.w500,
+                                        ),
                                       ),
                                     ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Row(
-                                children: [
-                                  const Icon(Icons.battery_charging_full_rounded, color: AppColors.success, size: 14),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Battery: ${attendance.startBattery}%',
-                                    style: GoogleFonts.plusJakartaSans(
-                                      fontSize: 12,
-                                      color: Colors.white70,
-                                    ),
-                                  ),
-                                  const SizedBox(width: 12),
-                                  const Icon(Icons.wifi_rounded, color: AppColors.primaryLight, size: 14),
-                                  const SizedBox(width: 6),
-                                  Text(
-                                    'Network: ${attendance.startNetwork}',
-                                    style: GoogleFonts.plusJakartaSans(
-                                      fontSize: 12,
-                                      color: Colors.white70,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 6),
-                              Text(
-                                'Device: ${attendance.deviceId}',
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 10,
-                                  color: Colors.white30,
+                                  ],
                                 ),
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                            ],
+                                const SizedBox(height: 6),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.battery_charging_full_rounded, color: AppColors.success, size: 14),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Battery: ${attendance.startBattery}%',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 12,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                    const SizedBox(width: 12),
+                                    const Icon(Icons.wifi_rounded, color: AppColors.primaryLight, size: 14),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      'Network: ${attendance.startNetwork}',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 12,
+                                        color: Colors.white70,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: 6),
+                                Text(
+                                  'Device: ${attendance.deviceId}',
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 10,
+                                    color: Colors.white30,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ],
+                            ),
                           ),
-                        ),
-                      ],
-                    ),
+                        ],
+                      ),
+                    ] else ...[
+                      Row(
+                        children: [
+                          const Icon(Icons.location_off_rounded, color: AppColors.textTertiary, size: 16),
+                          const SizedBox(width: 8),
+                          Text(
+                            'GPS: Not Required',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.white70,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,
@@ -442,7 +491,9 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
                     ),
                   ] else ...[
                     Text(
-                      'Start your day to initiate live GPS tracking and enable visit logging.',
+                      isField
+                          ? 'Start your day to initiate live GPS tracking and enable visit logging.'
+                          : 'Start your shift to begin recording your duty hours for today.',
                       style: GoogleFonts.plusJakartaSans(
                         fontSize: 12,
                         color: Colors.white.withValues(alpha: 0.6),

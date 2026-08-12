@@ -4,6 +4,7 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:uuid/uuid.dart';
 import '../data/models/telecaller_model.dart';
 import '../core/services/fcm_service.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
 
 final activeUserProvider = StateNotifierProvider<AuthNotifier, TelecallerModel?>((ref) {
   return AuthNotifier();
@@ -86,6 +87,14 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
     
     // Re-generate a generic unique device ID upon logout for security
     await box.put('device_id', const Uuid().v4());
+    
+    // Explicitly stop background location service if running on logout
+    try {
+      final service = FlutterBackgroundService();
+      if (await service.isRunning()) {
+        service.invoke('stopService');
+      }
+    } catch (_) {}
     
     state = null;
   }

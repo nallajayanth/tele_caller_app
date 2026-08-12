@@ -17,7 +17,7 @@ import '../../providers/deleted_log_providers.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/order_providers.dart';
 import '../../providers/auth_providers.dart';
-import '../common/screens/followup_filter_screen.dart';
+
 import '../common/widgets/success_toast.dart';
 import 'screens/bin_screen.dart';
 import 'screens/target_management_screen.dart';
@@ -29,7 +29,7 @@ import 'screens/live_tracking_screen.dart';
 import 'views/admin_edit_modal.dart';
 import 'widgets/admin_log_card.dart';
 import 'widgets/metric_tile.dart';
-import 'package:hive_flutter/hive_flutter.dart';
+
 
 class AdminTerminal extends ConsumerStatefulWidget {
   const AdminTerminal({super.key});
@@ -40,14 +40,14 @@ class AdminTerminal extends ConsumerStatefulWidget {
 
 class _AdminTerminalState extends ConsumerState<AdminTerminal> {
   final _searchCtrl = TextEditingController();
-  final _pageCtrl = PageController();
   final _scrollCtrl = ScrollController();
-  int _metricPage = 0;
+  int _currentIndex = 0;
+  int _displayLimit = 30;
+  LogFilterState? _lastFilter;
 
   @override
   void dispose() {
     _searchCtrl.dispose();
-    _pageCtrl.dispose();
     _scrollCtrl.dispose();
     super.dispose();
   }
@@ -203,6 +203,10 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     final metrics = ref.watch(dashboardMetricsProvider);
     final filter = ref.watch(logFilterProvider);
+    if (_lastFilter != filter) {
+      _displayLimit = 30;
+      _lastFilter = filter;
+    }
     final filteredLogs = ref.watch(filteredLogsProvider);
     final binCount = ref.watch(deletedLogProvider).length;
     final dailyStats = ref.watch(globalOrderStatsProvider);
@@ -224,12 +228,7 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
         .fold<double>(0.0, (sum, l) => sum + l.orderValue);
 
     return Scaffold(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'Sign Out',
-          icon: const Icon(Icons.logout_rounded, size: 20),
-          onPressed: () => _confirmSignOut(context, ref),
-        ),
+      appBar: _currentIndex == 0 ? AppBar(
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -243,94 +242,107 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
         ),
         actions: [
           IconButton(
-            icon: Icon(
-              isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
-              size: 22,
+            tooltip: 'Sign Out',
+            icon: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: AppColors.error.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.logout_rounded,
+                  color: AppColors.error, size: 18),
             ),
-            onPressed: () => ref.read(themeModeProvider.notifier).toggle(),
+            onPressed: () => _confirmSignOut(context, ref),
           ),
-          // Recycle Bin with badge
-          IconButton(
-            tooltip: 'Recycle Bin',
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(builder: (_) => const BinScreen()),
+          PopupMenuButton<String>(
+            icon: const Icon(Icons.more_vert_rounded),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
             ),
-            icon: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: binCount > 0
-                        ? AppColors.error.withValues(alpha: 0.12)
-                        : AppColors.textTertiary.withValues(alpha: 0.08),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(
-                    Icons.delete_outline_rounded,
-                    color: binCount > 0 ? AppColors.error : AppColors.textTertiary,
-                    size: 18,
-                  ),
-                ),
-                if (binCount > 0)
-                  Positioned(
-                    top: -4,
-                    right: -4,
-                    child: Container(
-                      padding: const EdgeInsets.all(3),
-                      decoration: const BoxDecoration(
-                        color: AppColors.error,
-                        shape: BoxShape.circle,
-                      ),
-                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                      child: Text(
-                        binCount > 9 ? '9+' : '$binCount',
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 9,
-                          color: Colors.white,
-                          fontWeight: FontWeight.w700,
-                        ),
-                        textAlign: TextAlign.center,
+            onSelected: (value) {
+              if (value == 'export') {
+                _exportCSV();
+              } else if (value == 'deleted') {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const BinScreen()),
+                );
+              } else if (value == 'theme') {
+                ref.read(themeModeProvider.notifier).toggle();
+              }
+            },
+            itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              PopupMenuItem<String>(
+                value: 'export',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.ios_share_rounded,
+                      size: 18,
+                      color: isDark ? Colors.white70 : AppColors.textPrimary,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Export to CSV',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : AppColors.textPrimary,
                       ),
                     ),
-                  ),
-              ],
-            ),
-          ),
-          IconButton(
-            icon: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(10),
+                  ],
+                ),
               ),
-              child: const Icon(Icons.event_rounded,
-                  color: AppColors.primary, size: 18),
-            ),
-            onPressed: () => Navigator.of(context).push(
-              MaterialPageRoute(
-                builder: (_) => const FollowUpFilterScreen(isAdmin: true),
+              PopupMenuItem<String>(
+                value: 'deleted',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.delete_outline_rounded,
+                      size: 18,
+                      color: isDark ? Colors.white70 : AppColors.textPrimary,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Recently Deleted',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
-            tooltip: 'Follow-up Tracker',
-          ),
-          IconButton(
-            icon: Container(
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                gradient: AppColors.accentGradient,
-                borderRadius: BorderRadius.circular(10),
+              PopupMenuItem<String>(
+                value: 'theme',
+                child: Row(
+                  children: [
+                    Icon(
+                      isDark ? Icons.light_mode_rounded : Icons.dark_mode_rounded,
+                      size: 18,
+                      color: isDark ? Colors.white70 : AppColors.textPrimary,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      isDark ? 'Light Mode' : 'Dark Mode',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-              child: const Icon(Icons.ios_share_rounded,
-                  color: Colors.white, size: 18),
-            ),
-            onPressed: _exportCSV,
-            tooltip: 'Export to CSV',
+            ],
           ),
           const SizedBox(width: 4),
         ],
-      ),
-      body: RefreshIndicator(
+      ) : null,
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          RefreshIndicator(
         color: AppColors.primary,
         onRefresh: () async {
           await ref.read(callLogsProvider.notifier).loadLogs();
@@ -342,154 +354,28 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
             child: Column(
               children: [
                 // Metrics carousel
-                SizedBox(
-                  height: 185,
-                  child: Column(
-                    children: [
-                      Expanded(
-                        child: PageView(
-                          controller: _pageCtrl,
-                          onPageChanged: (i) => setState(() => _metricPage = i),
-                          children: [
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                              child: MetricTile(
-                                title: "Today's Calls",
-                                value: metrics.todayCallCount.toString(),
-                                subtitle: 'Logged today',
-                                icon: Icons.call_rounded,
-                                gradientColors: const [Color(0xFF005F54), Color(0xFF00857A)],
-                                index: 0,
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                              child: MetricTile(
-                                title: 'Total Order Value',
-                                value: _fmtValue(metrics.totalOrderValue),
-                                subtitle: 'Cumulative ₹',
-                                icon: Icons.currency_rupee_rounded,
-                                gradientColors: const [Color(0xFFD97706), Color(0xFFB45309)],
-                                index: 1,
-                              ),
-                            ),
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
-                              child: MetricTile(
-                                title: 'Urgent Follow-ups',
-                                value: metrics.urgentFollowUps.toString(),
-                                subtitle: 'Today & tomorrow',
-                                icon: Icons.notifications_active_rounded,
-                                gradientColors: const [Color(0xFFDC2626), Color(0xFFEF4444)],
-                                index: 2,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: List.generate(3, (i) {
-                          return AnimatedContainer(
-                            duration: const Duration(milliseconds: 250),
-                            margin: const EdgeInsets.symmetric(horizontal: 3),
-                            width: _metricPage == i ? 18 : 6,
-                            height: 6,
-                            decoration: BoxDecoration(
-                              color: _metricPage == i
-                                  ? AppColors.primary
-                                  : AppColors.textTertiary.withValues(alpha: 0.4),
-                              borderRadius: BorderRadius.circular(3),
-                            ),
-                          );
-                        }),
-                      ),
-                      const SizedBox(height: 4),
-                    ],
+                // Today's Calls Metric Card
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                  child: SizedBox(
+                    height: 155,
+                    child: MetricTile(
+                      title: "Today's Calls",
+                      value: metrics.todayCallCount.toString(),
+                      subtitle: 'Logged today',
+                      icon: Icons.call_rounded,
+                      gradientColors: const [Color(0xFF005F54), Color(0xFF00857A)],
+                      index: 0,
+                    ),
                   ),
                 ),
 
-                // Admin control panel tools grid
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'ADMIN CONTROL PANEL',
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w800,
-                          color: AppColors.primary,
-                          letterSpacing: 1.0,
-                        ),
-                      ),
-                      const SizedBox(height: 10),
-                      SizedBox(
-                        height: 72,
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          children: [
-                            _AdminToolBtn(
-                              label: 'Targets',
-                              icon: Icons.track_changes_rounded,
-                              color: const Color(0xFF3B82F6),
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const TargetManagementScreen()),
-                              ),
-                            ),
-                            _AdminToolBtn(
-                              label: 'Live Map',
-                              icon: Icons.map_rounded,
-                              color: const Color(0xFFEC4899),
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const LiveTrackingScreen()),
-                              ),
-                            ),
-                            _AdminToolBtn(
-                              label: 'Analytics',
-                              icon: Icons.bar_chart_rounded,
-                              color: AppColors.accent,
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const SalesAnalyticsScreen()),
-                              ),
-                            ),
-                            _AdminToolBtn(
-                              label: 'Monitoring',
-                              icon: Icons.people_rounded,
-                              color: const Color(0xFF8B5CF6),
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const EmployeeMonitoringScreen()),
-                              ),
-                            ),
-                            _AdminToolBtn(
-                              label: 'Employees',
-                              icon: Icons.manage_accounts_rounded,
-                              color: AppColors.primary,
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const UserManagementScreen()),
-                              ),
-                            ),
-                            _AdminToolBtn(
-                              label: 'Products',
-                              icon: Icons.inventory_2_rounded,
-                              color: const Color(0xFF10B981),
-                              onTap: () => Navigator.of(context).push(
-                                MaterialPageRoute(builder: (_) => const ProductManagementScreen()),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                const SizedBox.shrink(),
 
                 // Today's Order Pipeline Stats Dashboard
                 _buildDailyOrderStats(context, isDark, dailyStats, filter),
 
-                // Weekly Cleanliness Reminder Card
-                _buildCleanlinessCard(context, isDark),
+                const SizedBox.shrink(),
 
                 // Date-wise Summary Card
                 Padding(
@@ -516,22 +402,28 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Row(
-                              children: [
-                                Icon(Icons.analytics_rounded,
-                                    size: 18, color: AppColors.primary),
-                                const SizedBox(width: 8),
-                                Text(
-                                  filter.dateFilter == null
-                                      ? 'All-Time Business Summary'
-                                      : 'Business Summary (${DateFormat('dd MMM yyyy').format(filter.dateFilter!)})',
-                                  style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.w700,
-                                    color: isDark ? Colors.white : AppColors.textPrimary,
+                            Expanded(
+                              child: Row(
+                                children: [
+                                  Icon(Icons.analytics_rounded,
+                                      size: 18, color: AppColors.primary),
+                                  const SizedBox(width: 8),
+                                  Expanded(
+                                    child: Text(
+                                      filter.dateFilter == null
+                                          ? 'All-Time Business Summary'
+                                          : 'Business Summary (${DateFormat('dd MMM yyyy').format(filter.dateFilter!)})',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w700,
+                                        color: isDark ? Colors.white : AppColors.textPrimary,
+                                      ),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
                                   ),
-                                ),
-                              ],
+                                ],
+                              ),
                             ),
                             // Date Selector Button
                             Row(
@@ -832,6 +724,38 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
               sliver: SliverList(
                 delegate: SliverChildBuilderDelegate(
                   (context, i) {
+                    if (i == _displayLimit) {
+                      final remaining = filteredLogs.length - _displayLimit;
+                      return Padding(
+                        padding: const EdgeInsets.only(top: 8, bottom: 20),
+                        child: Center(
+                          child: TextButton.icon(
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                              backgroundColor: AppColors.primary.withValues(alpha: 0.1),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(12),
+                              ),
+                            ),
+                            onPressed: () {
+                              HapticFeedback.lightImpact();
+                              setState(() {
+                                _displayLimit += 30;
+                              });
+                            },
+                            icon: const Icon(Icons.add_rounded, color: AppColors.primary),
+                            label: Text(
+                              'Load More ($remaining remaining)',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontWeight: FontWeight.bold,
+                                color: AppColors.primary,
+                              ),
+                            ),
+                          ),
+                        ),
+                      );
+                    }
+
                     final log = filteredLogs[i];
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 10),
@@ -842,13 +766,24 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
                       ),
                     );
                   },
-                  childCount: filteredLogs.length,
+                  childCount: filteredLogs.length > _displayLimit
+                      ? _displayLimit + 1
+                      : filteredLogs.length,
                 ),
               ),
             ),
         ],
       ),
     ),
+          const LiveTrackingScreen(),
+          const SalesAnalyticsScreen(),
+          _AdminSettingsTab(binCount: binCount),
+        ],
+      ),
+      bottomNavigationBar: _AdminBottomNav(
+        currentIndex: _currentIndex,
+        onTap: (i) => setState(() => _currentIndex = i),
+      ),
     );
   }
 
@@ -859,136 +794,7 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
     return '₹${v.toStringAsFixed(0)}';
   }
 
-  Widget _buildCleanlinessCard(BuildContext context, bool isDark) {
-    final box = Hive.box('settings');
-    final lastMaintenanceStr = box.get('last_maintenance_date');
-    DateTime? lastMaintenance;
-    if (lastMaintenanceStr != null) {
-      lastMaintenance = DateTime.parse(lastMaintenanceStr as String);
-    }
 
-    final now = DateTime.now();
-    final isSunday = now.weekday == DateTime.sunday;
-    final hasDoneToday = lastMaintenance != null &&
-        lastMaintenance.year == now.year &&
-        lastMaintenance.month == now.month &&
-        lastMaintenance.day == now.day;
-
-    final bg = isDark ? AppColors.darkSurface : Colors.white;
-
-    if (isSunday && !hasDoneToday) {
-      return Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        child: Container(
-          padding: const EdgeInsets.all(16),
-          decoration: BoxDecoration(
-            color: AppColors.error.withValues(alpha: 0.1),
-            borderRadius: BorderRadius.circular(16),
-            border: Border.all(color: AppColors.error.withValues(alpha: 0.4), width: 1.5),
-          ),
-          child: Row(
-            children: [
-              Container(
-                padding: const EdgeInsets.all(8),
-                decoration: const BoxDecoration(color: AppColors.error, shape: BoxShape.circle),
-                child: const Icon(Icons.cleaning_services_rounded, color: Colors.white, size: 20),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'WEEKLY WAREHOUSE CLEANLINESS DUE',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 10,
-                        fontWeight: FontWeight.w800,
-                        color: AppColors.error,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'Sunday clean-up and warehouse audit is required.',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
-                        color: isDark ? Colors.white70 : AppColors.textPrimary,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-              ElevatedButton(
-                onPressed: () async {
-                  HapticFeedback.heavyImpact();
-                  await box.put('last_maintenance_date', DateTime.now().toIso8601String());
-                  setState(() {});
-                },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppColors.error,
-                  foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                ),
-                child: const Text('Mark Done'),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: isDark ? AppColors.borderDark : AppColors.border),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: AppColors.success.withValues(alpha: 0.1),
-                shape: BoxShape.circle,
-              ),
-              child: const Icon(Icons.cleaning_services_rounded, color: AppColors.success, size: 20),
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'WAREHOUSE MAINTENANCE',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 10,
-                      fontWeight: FontWeight.w800,
-                      color: AppColors.success,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    hasDoneToday
-                        ? 'Warehouse cleanliness verified for today!'
-                        : 'Warehouse cleanliness: Next audit scheduled for Sunday.',
-                    style: GoogleFonts.plusJakartaSans(
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                      color: isDark ? Colors.white70 : AppColors.textPrimary,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
 
   Widget _buildDailyOrderStats(BuildContext context, bool isDark, DailyOrderStats stats, LogFilterState filter) {
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
@@ -1424,47 +1230,304 @@ class _EmptyFiltered extends StatelessWidget {
 
 
 
-class _AdminToolBtn extends StatelessWidget {
-  final String label;
+class _AdminBottomNav extends StatelessWidget {
+  final int currentIndex;
+  final ValueChanged<int> onTap;
+
+  const _AdminBottomNav({required this.currentIndex, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final bg = isDark ? AppColors.darkSurface : Colors.white;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: bg,
+        border: Border(
+          top: BorderSide(
+            color: isDark ? AppColors.borderDark : AppColors.border,
+            width: 1,
+          ),
+        ),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.06),
+            blurRadius: 16,
+            offset: const Offset(0, -4),
+          ),
+        ],
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+          child: Row(
+            children: [
+              _AdminNavItem(
+                icon: Icons.dashboard_outlined,
+                activeIcon: Icons.dashboard_rounded,
+                label: 'Dashboard',
+                isActive: currentIndex == 0,
+                onTap: () => onTap(0),
+              ),
+              _AdminNavItem(
+                icon: Icons.map_outlined,
+                activeIcon: Icons.map_rounded,
+                label: 'Live Map',
+                isActive: currentIndex == 1,
+                onTap: () => onTap(1),
+              ),
+              _AdminNavItem(
+                icon: Icons.bar_chart_outlined,
+                activeIcon: Icons.bar_chart_rounded,
+                label: 'Analytics',
+                isActive: currentIndex == 2,
+                onTap: () => onTap(2),
+              ),
+              _AdminNavItem(
+                icon: Icons.settings_outlined,
+                activeIcon: Icons.settings_rounded,
+                label: 'Settings',
+                isActive: currentIndex == 3,
+                onTap: () => onTap(3),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminNavItem extends StatelessWidget {
   final IconData icon;
-  final Color color;
+  final IconData activeIcon;
+  final String label;
+  final bool isActive;
   final VoidCallback onTap;
 
-  const _AdminToolBtn({
-    required this.label,
+  const _AdminNavItem({
     required this.icon,
-    required this.color,
+    required this.activeIcon,
+    required this.label,
+    required this.isActive,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: () {
-        HapticFeedback.lightImpact();
-        onTap();
-      },
-      child: Container(
-        width: 110,
-        margin: const EdgeInsets.only(right: 12),
-        padding: const EdgeInsets.all(10),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.08),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(color: color.withValues(alpha: 0.25), width: 1.2),
-        ),
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, color: color, size: 20),
-            const SizedBox(height: 4),
-            Text(
-              label,
-              style: GoogleFonts.plusJakartaSans(
-                fontSize: 11,
-                fontWeight: FontWeight.w700,
-                color: color,
+    return Expanded(
+      child: GestureDetector(
+        onTap: onTap,
+        behavior: HitTestBehavior.opaque,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          curve: Curves.fastOutSlowIn,
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: isActive
+                ? AppColors.primary.withValues(alpha: 0.1)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Icon(
+                  isActive ? activeIcon : icon,
+                  key: ValueKey(isActive),
+                  color: isActive ? AppColors.primary : AppColors.textTertiary,
+                  size: 24,
+                ),
               ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 11,
+                  fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
+                  color: isActive ? AppColors.primary : AppColors.textTertiary,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AdminSettingsTab extends StatelessWidget {
+  final int binCount;
+
+  const _AdminSettingsTab({required this.binCount});
+
+  @override
+  Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(
+          'Admin Settings',
+          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700),
+        ),
+      ),
+      body: ListView(
+        padding: const EdgeInsets.all(16),
+        children: [
+          _buildSettingsTile(
+            context: context,
+            title: 'Targets',
+            subtitle: 'Configure employee monthly targets',
+            icon: Icons.track_changes_rounded,
+            color: const Color(0xFF3B82F6),
+            isDark: isDark,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const TargetManagementScreen()),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildSettingsTile(
+            context: context,
+            title: 'Monitoring',
+            subtitle: 'Track employee call and shift status',
+            icon: Icons.people_rounded,
+            color: const Color(0xFF8B5CF6),
+            isDark: isDark,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const EmployeeMonitoringScreen()),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildSettingsTile(
+            context: context,
+            title: 'Employees',
+            subtitle: 'Manage roles and credentials',
+            icon: Icons.manage_accounts_rounded,
+            color: AppColors.primary,
+            isDark: isDark,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const UserManagementScreen()),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildSettingsTile(
+            context: context,
+            title: 'Products',
+            subtitle: 'Manage items catalog and stock levels',
+            icon: Icons.inventory_2_rounded,
+            color: const Color(0xFF10B981),
+            isDark: isDark,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const ProductManagementScreen()),
+            ),
+          ),
+
+          const SizedBox(height: 12),
+          _buildSettingsTile(
+            context: context,
+            title: 'Recycle Bin',
+            subtitle: 'Recently deleted call logs',
+            icon: Icons.delete_outline_rounded,
+            color: AppColors.error,
+            isDark: isDark,
+            badgeCount: binCount,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BinScreen()),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSettingsTile({
+    required BuildContext context,
+    required String title,
+    required String subtitle,
+    required IconData icon,
+    required Color color,
+    required bool isDark,
+    required VoidCallback onTap,
+    int? badgeCount,
+  }) {
+    final cardColor = isDark ? AppColors.darkSurface : Colors.white;
+    final showBadge = badgeCount != null && badgeCount > 0;
+
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: cardColor,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: isDark ? AppColors.borderDark : AppColors.border),
+          boxShadow: AppShadows.card,
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 24),
+            ),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Text(
+                        title,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 15,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white : AppColors.textPrimary,
+                        ),
+                      ),
+                      if (showBadge) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.error,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                          child: Text(
+                            badgeCount > 9 ? '9+' : '$badgeCount',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 9,
+                              color: Colors.white,
+                              fontWeight: FontWeight.w800,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    subtitle,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 12,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Icon(
+              Icons.chevron_right_rounded,
+              color: isDark ? Colors.white38 : Colors.black38,
             ),
           ],
         ),

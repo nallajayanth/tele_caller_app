@@ -41,7 +41,7 @@ class TargetManagementScreen extends ConsumerStatefulWidget {
 
 class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen> {
   final Map<String, TextEditingController> _controllers = {};
-  bool _isSaving = false;
+  final Set<String> _savingStaffPhones = {};
 
   @override
   void dispose() {
@@ -52,7 +52,7 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
   }
 
   Future<void> _saveTarget(String staffPhone, double amount) async {
-    setState(() => _isSaving = true);
+    setState(() => _savingStaffPhones.add(staffPhone));
     HapticFeedback.mediumImpact();
 
     try {
@@ -105,7 +105,9 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
         );
       }
     } finally {
-      setState(() => _isSaving = false);
+      if (mounted) {
+        setState(() => _savingStaffPhones.remove(staffPhone));
+      }
     }
   }
 
@@ -183,7 +185,9 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
 
                     final controller = _controllers[staff.phoneNumber]!;
 
-                    return Card(
+                                final isThisSaving = _savingStaffPhones.contains(staff.phoneNumber);
+
+                                return Card(
                       margin: const EdgeInsets.only(bottom: 12),
                       color: cardColor,
                       shape: RoundedRectangleBorder(
@@ -258,19 +262,69 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
                                 const SizedBox(width: 12),
                                 SizedBox(
                                   height: 48,
-                                  child: ElevatedButton(
-                                    onPressed: _isSaving
-                                        ? null
-                                        : () {
-                                            final val = double.tryParse(controller.text) ?? 0.0;
-                                            _saveTarget(staff.phoneNumber, val);
-                                          },
-                                    style: ElevatedButton.styleFrom(
-                                      backgroundColor: AppColors.primary,
-                                      foregroundColor: Colors.white,
-                                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  child: Container(
+                                    decoration: BoxDecoration(
+                                      gradient: isThisSaving
+                                          ? null
+                                          : const LinearGradient(
+                                              colors: [Color(0xFF00857A), Color(0xFF005F54)],
+                                              begin: Alignment.topLeft,
+                                              end: Alignment.bottomRight,
+                                            ),
+                                      color: isThisSaving ? (isDark ? Colors.white10 : Colors.black12) : null,
+                                      borderRadius: BorderRadius.circular(12),
+                                      boxShadow: isThisSaving
+                                          ? []
+                                          : [
+                                              BoxShadow(
+                                                color: const Color(0xFF005F54).withValues(alpha: 0.22),
+                                                blurRadius: 8,
+                                                offset: const Offset(0, 3),
+                                              ),
+                                            ],
                                     ),
-                                    child: const Text('Save'),
+                                    child: ElevatedButton(
+                                      onPressed: isThisSaving
+                                          ? null
+                                          : () {
+                                              final val = double.tryParse(controller.text) ?? 0.0;
+                                              _saveTarget(staff.phoneNumber, val);
+                                            },
+                                      style: ElevatedButton.styleFrom(
+                                        backgroundColor: Colors.transparent,
+                                        shadowColor: Colors.transparent,
+                                        foregroundColor: Colors.white,
+                                        disabledForegroundColor: isDark ? Colors.white30 : Colors.black38,
+                                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                                      ),
+                                      child: Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          if (isThisSaving)
+                                            const SizedBox(
+                                              width: 16,
+                                              height: 16,
+                                              child: CircularProgressIndicator(
+                                                color: Colors.white,
+                                                strokeWidth: 2,
+                                              ),
+                                            )
+                                          else ...[
+                                            const Icon(Icons.check_circle_outline_rounded, size: 16),
+                                            const SizedBox(width: 8),
+                                            Text(
+                                              'Save',
+                                              style: GoogleFonts.plusJakartaSans(
+                                                fontSize: 14,
+                                                fontWeight: FontWeight.w700,
+                                                letterSpacing: 0.3,
+                                              ),
+                                            ),
+                                          ],
+                                        ],
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ],

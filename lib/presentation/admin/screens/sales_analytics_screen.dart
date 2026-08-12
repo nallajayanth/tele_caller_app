@@ -52,6 +52,7 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
 
           final monthlySalesValue = thisMonthLogs.fold<double>(0.0, (sum, l) => sum + l.orderValue);
           final dailyAvgSalesValue = now.day > 0 ? monthlySalesValue / now.day : 0.0;
+          final todaySalesValue = todayLogs.fold<double>(0.0, (sum, l) => sum + l.orderValue);
 
           // Parse quantities sold
           final todaySold = _getProductQuantities(todayLogs, products);
@@ -107,10 +108,10 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
                 children: [
                   Expanded(
                     child: _buildStatCard(
-                      'TOTAL SALES',
-                      '₹${_formatCurrency(totalSales)}',
-                      Icons.payments_rounded,
-                      AppColors.primary,
+                      "TODAY'S SALES",
+                      '₹${_formatCurrency(todaySalesValue)}',
+                      Icons.today_rounded,
+                      const Color(0xFF10B981),
                       cardColor,
                       isDark,
                     ),
@@ -118,7 +119,7 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
                   const SizedBox(width: 12),
                   Expanded(
                     child: _buildStatCard(
-                      'THIS MONTH',
+                      'MONTH SALES',
                       '₹${_formatCurrency(monthlySalesValue)}',
                       Icons.calendar_month_rounded,
                       AppColors.accent,
@@ -127,6 +128,15 @@ class _SalesAnalyticsScreenState extends ConsumerState<SalesAnalyticsScreen> {
                     ),
                   ),
                 ],
+              ),
+              const SizedBox(height: 12),
+              _buildStatCard(
+                'TOTAL SALES',
+                '₹${_formatCurrency(totalSales)}',
+                Icons.payments_rounded,
+                AppColors.primary,
+                cardColor,
+                isDark,
               ),
               const SizedBox(height: 16),
 

@@ -4,13 +4,47 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'auth_providers.dart';
+import 'attendance_providers.dart';
+import '../data/models/attendance_model.dart';
 
 class ShiftStatusNotifier extends StateNotifier<bool> {
   final Ref _ref;
   StreamSubscription<Position>? _positionSubscription;
+  ProviderSubscription? _attendanceSubscription;
 
   ShiftStatusNotifier(this._ref) : super(false) {
     _checkRunningStatus();
+    _listenToAttendance();
+  }
+
+  void _listenToAttendance() {
+    _attendanceSubscription?.close();
+    _attendanceSubscription = _ref.listen<AsyncValue<AttendanceModel?>>(
+      activeAttendanceProvider,
+      (previous, next) {
+        final activeUser = _ref.read(activeUserProvider);
+        if (activeUser == null || activeUser.role != 'staff' || !activeUser.isFieldStaff) {
+          if (state) {
+            endShift();
+          }
+          return;
+        }
+
+        next.whenData((attendance) {
+          final isActive = attendance != null && attendance.isActive;
+          if (isActive) {
+            if (!state) {
+              startShift();
+            }
+          } else {
+            if (state) {
+              endShift();
+            }
+          }
+        });
+      },
+      fireImmediately: true,
+    );
   }
 
   Future<void> _checkRunningStatus() async {
@@ -18,8 +52,11 @@ class ShiftStatusNotifier extends StateNotifier<bool> {
     state = running;
     if (running) {
       final activeUser = _ref.read(activeUserProvider);
-      if (activeUser != null) {
+      if (activeUser != null && activeUser.role == 'staff' && activeUser.isFieldStaff) {
         _startForegroundTracking(activeUser.phoneNumber, activeUser.name);
+      } else {
+        // If service is running but user is not field staff or logged out, stop it
+        endShift();
       }
     }
   }
@@ -27,7 +64,9 @@ class ShiftStatusNotifier extends StateNotifier<bool> {
   /// Requests permission and starts the background location shift service.
   Future<bool> startShift() async {
     final activeUser = _ref.read(activeUserProvider);
-    if (activeUser == null) return false;
+    if (activeUser == null || activeUser.role != 'staff' || !activeUser.isFieldStaff) {
+      return false;
+    }
 
     // 1. Check if location services are enabled
     bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -75,11 +114,12 @@ class ShiftStatusNotifier extends StateNotifier<bool> {
     backgroundService.invoke('stopService');
     state = false;
 
-    if (activeUser != null) {
+    final phone = activeUser?.phoneNumber;
+    if (phone != null && phone.isNotEmpty) {
       try {
         await FirebaseFirestore.instance
             .collection('staff_locations')
-            .doc(activeUser.phoneNumber)
+            .doc(phone)
             .update({'isOnline': false});
       } catch (_) {}
     }
@@ -116,6 +156,7 @@ class ShiftStatusNotifier extends StateNotifier<bool> {
 
   @override
   void dispose() {
+    _attendanceSubscription?.close();
     _stopForegroundTracking();
     super.dispose();
   }

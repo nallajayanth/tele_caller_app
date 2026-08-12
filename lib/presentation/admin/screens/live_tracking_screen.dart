@@ -5,17 +5,19 @@ import 'package:latlong2/latlong.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'user_management_screen.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 
-class LiveTrackingScreen extends StatefulWidget {
+class LiveTrackingScreen extends ConsumerStatefulWidget {
   const LiveTrackingScreen({super.key});
 
   @override
-  State<LiveTrackingScreen> createState() => _LiveTrackingScreenState();
+  ConsumerState<LiveTrackingScreen> createState() => _LiveTrackingScreenState();
 }
 
-class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
+class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   final MapController _mapController = MapController();
   String? _selectedStaffPhone;
 
@@ -26,6 +28,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
+    final employeesAsync = ref.watch(employeesProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -42,6 +45,12 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
           }
 
           final docs = snapshot.data?.docs ?? [];
+          final employees = employeesAsync.value ?? [];
+          final fieldStaffPhones = employees
+              .where((e) => e.isFieldStaff)
+              .map((e) => e.phoneNumber)
+              .toSet();
+
           final activeStaffList = docs.map((doc) {
             final data = doc.data() as Map<String, dynamic>;
             final timestampVal = data['timestamp'];
@@ -58,7 +67,7 @@ class _LiveTrackingScreenState extends State<LiveTrackingScreen> {
               isOnline: data['isOnline'] as bool? ?? false,
               lastUpdated: updatedTime,
             );
-          }).toList();
+          }).where((staff) => fieldStaffPhones.contains(staff.phoneNumber)).toList();
 
           // Filter to show active coordinates
           final validLocations = activeStaffList.where((s) => s.latitude != 0.0 && s.longitude != 0.0).toList();

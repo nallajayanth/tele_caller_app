@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_spacing.dart';
-import '../../core/services/location_permission_helper.dart';
 import '../../providers/theme_provider.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/call_log_providers.dart';
@@ -28,9 +27,6 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      LocationPermissionHelper.checkAndRequestPermission(context: context);
-    });
   }
 
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
@@ -95,15 +91,7 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
   Widget build(BuildContext context) {
     final isDark = ref.watch(themeModeProvider) == ThemeMode.dark;
     
-    final attendanceAsync = ref.watch(activeAttendanceProvider);
-    attendanceAsync.whenData((attendance) {
-      if (attendance == null) {
-        WidgetsBinding.instance.addPostFrameCallback((_) {
-          ref.read(activeUserProvider.notifier).signOut();
-          ref.read(callLogsProvider.notifier).loadLogs();
-        });
-      }
-    });
+
 
     // Check Operational Lock: on the 1st of the month, target must be set.
     final targetAsync = ref.watch(staffMonthlyTargetProvider);
@@ -219,6 +207,10 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
         actions: [
           Consumer(
             builder: (ctx, ref, _) {
+              final activeUser = ref.watch(activeUserProvider);
+              if (activeUser == null || activeUser.role != 'staff' || !activeUser.isFieldStaff) {
+                return const SizedBox.shrink();
+              }
               final isShiftActive = ref.watch(shiftStatusProvider);
               return IconButton(
                 tooltip: 'Work Shift Location Tracker',
@@ -361,65 +353,63 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
                   ),
                   const SizedBox(height: 32),
                   ElevatedButton.icon(
-                    onPressed: () async {
-                      Navigator.of(ctx).pop();
-                      HapticFeedback.mediumImpact();
-                      if (currentActive) {
-                        await ref.read(shiftStatusProvider.notifier).endShift();
-                        if (context.mounted) {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text(
-                                'Shift ended. Location tracking is now OFF.',
-                                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
-                              ),
-                              backgroundColor: AppColors.textSecondary,
-                              behavior: SnackBarBehavior.floating,
-                            ),
-                          );
-                        }
-                      } else {
-                        final success = await ref.read(shiftStatusProvider.notifier).startShift();
-                        if (context.mounted) {
-                          if (success) {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Shift started! Background location tracking is active.',
-                                  style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
-                                ),
-                                backgroundColor: AppColors.success,
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
-                          } else {
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text(
-                                  'Failed to start shift. Please grant location permissions.',
-                                  style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
-                                ),
-                                backgroundColor: AppColors.error,
-                                behavior: SnackBarBehavior.floating,
-                              ),
-                            );
+                    onPressed: currentActive 
+                        ? () async {
+                            Navigator.of(ctx).pop();
+                            HapticFeedback.mediumImpact();
+                            final success = await ref.read(activeAttendanceProvider.notifier).endDuty();
+                            if (context.mounted) {
+                              if (success) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Shift ended. Location tracking is now OFF.',
+                                      style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                                    ),
+                                    backgroundColor: AppColors.textSecondary,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              } else {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(
+                                      'Failed to end shift. Please try again.',
+                                      style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                                    ),
+                                    backgroundColor: AppColors.error,
+                                    behavior: SnackBarBehavior.floating,
+                                  ),
+                                );
+                              }
+                            }
                           }
-                        }
-                      }
-                    },
+                        : () {
+                            Navigator.of(ctx).pop();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(
+                                  'Please tap "START DUTY SHIFT" on the dashboard to clock in.',
+                                  style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                                ),
+                                backgroundColor: AppColors.primary,
+                                behavior: SnackBarBehavior.floating,
+                              ),
+                            );
+                          },
                     icon: Icon(
-                      currentActive ? Icons.location_off_rounded : Icons.location_on_rounded,
+                      currentActive ? Icons.location_off_rounded : Icons.info_outline_rounded,
                       size: 18,
                     ),
                     label: Text(
-                      currentActive ? 'End Shift (Clock Out)' : 'Start Shift (Clock In)',
+                      currentActive ? 'End Shift (Clock Out)' : 'Clock In on Dashboard',
                       style: GoogleFonts.plusJakartaSans(
                         fontWeight: FontWeight.w700,
                         fontSize: 14,
                       ),
                     ),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: currentActive ? AppColors.error : AppColors.primary,
+                      backgroundColor: currentActive ? AppColors.error : AppColors.textTertiary,
                       foregroundColor: Colors.white,
                       minimumSize: const Size(double.infinity, 48),
                       shape: RoundedRectangleBorder(

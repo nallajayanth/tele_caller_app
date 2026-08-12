@@ -3,12 +3,14 @@ class TelecallerModel {
   final String name;
   final String role; // 'admin' or 'staff'
   final String pin;
+  final bool isFieldStaff;
 
   const TelecallerModel({
     required this.phoneNumber,
     required this.name,
     required this.role,
     required this.pin,
+    this.isFieldStaff = false,
   });
 
   factory TelecallerModel.fromJson(Map<String, dynamic> json) {
@@ -17,6 +19,7 @@ class TelecallerModel {
       name: json['name'] as String,
       role: json['role'] as String,
       pin: json['pin'] as String,
+      isFieldStaff: json['is_field_staff'] as bool? ?? false,
     );
   }
 
@@ -26,6 +29,7 @@ class TelecallerModel {
       'name': name,
       'role': role,
       'pin': pin,
+      'is_field_staff': isFieldStaff,
     };
   }
 }

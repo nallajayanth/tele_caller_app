@@ -4,7 +4,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:intl/intl.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:battery_plus/battery_plus.dart';
 import '../data/models/attendance_model.dart';
 import '../core/services/location_permission_helper.dart';
@@ -13,15 +12,16 @@ import 'auth_providers.dart';
 final activeAttendanceProvider = StateNotifierProvider<AttendanceNotifier, AsyncValue<AttendanceModel?>>((ref) {
   final user = ref.watch(activeUserProvider);
   final deviceId = ref.watch(deviceIdProvider);
-  return AttendanceNotifier(user?.phoneNumber, user?.name, deviceId);
+  return AttendanceNotifier(ref, user?.phoneNumber, user?.name, deviceId);
 });
 
 class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
+  final Ref _ref;
   final String? _userPhone;
   final String? _userName;
   final String _deviceId;
 
-  AttendanceNotifier(this._userPhone, this._userName, this._deviceId)
+  AttendanceNotifier(this._ref, this._userPhone, this._userName, this._deviceId)
       : super(const AsyncValue.loading()) {
     if (_userPhone != null && _userPhone.isNotEmpty) {
       loadTodayAttendance();
@@ -73,20 +73,29 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
     try {
       state = const AsyncValue.loading();
       
-      Position? pos = position;
-      if (pos == null) {
-        // Prompt OS location permission dialog if denied
-        await LocationPermissionHelper.checkAndRequestPermission();
+      final activeUser = _ref.read(activeUserProvider);
+      final isField = activeUser != null && activeUser.role == 'staff' && activeUser.isFieldStaff;
 
-        try {
-          pos = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
-            timeLimit: const Duration(seconds: 10),
-          );
-        } catch (_) {
+      Position? pos;
+      if (isField) {
+        pos = position;
+        if (pos == null) {
+          // Prompt OS location permission dialog if denied
+          await LocationPermissionHelper.checkAndRequestPermission();
+
           try {
-            pos = await Geolocator.getLastKnownPosition();
-          } catch (_) {}
+            pos = await Geolocator.getCurrentPosition(
+              desiredAccuracy: LocationAccuracy.high,
+              timeLimit: const Duration(seconds: 10),
+            );
+          } catch (_) {
+            try {
+              pos = await Geolocator.getLastKnownPosition();
+            } catch (_) {}
+          }
+        }
+        if (pos == null) {
+          throw Exception('Location (GPS) is required to start your duty shift.');
         }
       }
 
@@ -127,16 +136,6 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
           .doc(docId)
           .set(newAttendance.toJson(), SetOptions(merge: true));
 
-      // Trigger background tracking service
-      final service = FlutterBackgroundService();
-      if (!await service.isRunning()) {
-        await service.startService();
-      }
-      service.invoke('initTask', {
-        'phoneNumber': targetPhone,
-        'name': targetName,
-      });
-
       state = AsyncValue.data(newAttendance);
       return true;
     } catch (e, st) {
@@ -153,16 +152,21 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
     try {
       state = const AsyncValue.loading();
 
+      final activeUser = _ref.read(activeUserProvider);
+      final isField = activeUser != null && activeUser.role == 'staff' && activeUser.isFieldStaff;
+
       Position? position;
-      try {
-        position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 10),
-        );
-      } catch (_) {
+      if (isField) {
         try {
-          position = await Geolocator.getLastKnownPosition();
-        } catch (_) {}
+          position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+            timeLimit: const Duration(seconds: 10),
+          );
+        } catch (_) {
+          try {
+            position = await Geolocator.getLastKnownPosition();
+          } catch (_) {}
+        }
       }
 
       int batteryLevel = 100;
@@ -195,10 +199,6 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
           .collection('attendance_logs')
           .doc(current.id)
           .update(updated.toJson());
-
-      // Stop background tracking service on end duty
-      final service = FlutterBackgroundService();
-      service.invoke('stopService');
 
       state = AsyncValue.data(updated);
       return true;

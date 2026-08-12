@@ -1,19 +1,13 @@
-import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:image_picker/image_picker.dart';
-import 'package:firebase_storage/firebase_storage.dart';
-import 'package:geolocator/geolocator.dart';
 import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_spacing.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/call_log_providers.dart';
-import '../../providers/attendance_providers.dart';
-import '../../core/services/location_permission_helper.dart';
 import '../common/widgets/premium_button.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -89,75 +83,10 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         return;
       }
 
-      // Step 2: For Field Staff, enforce location & selfie capture while LoginScreen is still mounted
-      if (user.role == 'staff') {
-        // A. Verify and capture GPS coordinates
-        if (mounted) setState(() => _loadingMsg = 'Verifying GPS...');
-        Position? position;
-        try {
-          await LocationPermissionHelper.checkAndRequestPermission();
-          position = await Geolocator.getCurrentPosition(
-            desiredAccuracy: LocationAccuracy.high,
-            timeLimit: const Duration(seconds: 12),
-          );
-        } catch (e) {
-          try {
-            position = await Geolocator.getLastKnownPosition();
-          } catch (_) {}
-          if (position == null) {
-            throw Exception('Location (GPS) is required to start your duty shift and log in.');
-          }
-        }
-
-        // B. Capture Front Camera Selfie
-        if (mounted) setState(() => _loadingMsg = 'Taking selfie...');
-        final picker = ImagePicker();
-        final picked = await picker.pickImage(
-          source: ImageSource.camera,
-          preferredCameraDevice: CameraDevice.front,
-          maxWidth: 800,
-          imageQuality: 85,
-        );
-
-        if (picked == null) {
-          throw Exception('Selfie verification is required to start your duty shift and log in.');
-        }
-
-        // C. Upload Selfie image to Storage
-        if (mounted) setState(() => _loadingMsg = 'Uploading selfie...');
-        final file = File(picked.path);
-        final timestamp = DateTime.now().millisecondsSinceEpoch;
-        final storageRef = FirebaseStorage.instance
-            .ref()
-            .child('attendance_selfies/selfie_${phone}_$timestamp.jpg');
-
-        final uploadTask = storageRef.putFile(file);
-        final snapshot = await uploadTask;
-        final selfieUrl = await snapshot.ref.getDownloadURL();
-
-        // D. Create/Start Duty shift record
-        if (mounted) setState(() => _loadingMsg = 'Clocking in...');
-        final formattedDeviceId = phone.length == 10 
-            ? '00000000-0000-0000-0000-${phone.padLeft(12, '0')}'
-            : phone;
-        final attendanceRef = ref.read(activeAttendanceProvider.notifier);
-        
-        final dutyStarted = await attendanceRef.startDuty(
-          phone: phone,
-          name: user.name,
-          deviceId: formattedDeviceId,
-          selfieUrl: selfieUrl,
-          position: position,
-        );
-        if (!dutyStarted) {
-          throw Exception('Failed to initialize attendance tracking. Please try again.');
-        }
-      }
-
-      // Step 3: Populate Call Logs
+      // Step 2: Populate Call Logs
       await ref.read(callLogsProvider.notifier).loadLogs();
 
-      // Step 4: Now set user session (navigates to dashboard)
+      // Step 3: Now set user session (navigates to dashboard)
       await ref.read(activeUserProvider.notifier).setUserSession(user);
 
       HapticFeedback.heavyImpact();

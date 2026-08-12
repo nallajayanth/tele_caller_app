@@ -40,6 +40,7 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
     final nameCtrl = TextEditingController();
     final pinCtrl = TextEditingController();
     String role = 'staff';
+    bool isFieldStaff = false;
 
     showDialog(
       context: context,
@@ -96,6 +97,16 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
                             if (val != null) setState(() => role = val);
                           },
                         ),
+                        if (role == 'staff') ...[
+                          const SizedBox(height: 16),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text('Field Staff', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600)),
+                            subtitle: Text('Enables GPS tracking & selfie checks during shift', style: GoogleFonts.plusJakartaSans(fontSize: 12)),
+                            value: isFieldStaff,
+                            onChanged: (val) => setState(() => isFieldStaff = val),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -111,7 +122,7 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
                     if (!formKey.currentState!.validate()) return;
 
                     Navigator.of(ctx).pop();
-                    await _addUser(phoneCtrl.text, nameCtrl.text, pinCtrl.text, role);
+                    await _addUser(phoneCtrl.text, nameCtrl.text, pinCtrl.text, role, isFieldStaff);
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
@@ -128,7 +139,7 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
     );
   }
 
-  Future<void> _addUser(String phone, String name, String pin, String role) async {
+  Future<void> _addUser(String phone, String name, String pin, String role, bool isFieldStaff) async {
     setState(() => _isProcessing = true);
     HapticFeedback.mediumImpact();
 
@@ -139,6 +150,7 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
         'name': name,
         'pin': pin,
         'role': role,
+        'is_field_staff': isFieldStaff,
       });
 
       ref.invalidate(employeesProvider);
@@ -160,6 +172,7 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
     final nameCtrl = TextEditingController(text: user.name);
     final pinCtrl = TextEditingController(text: user.pin);
     String role = user.role;
+    bool isFieldStaff = user.isFieldStaff;
 
     showDialog(
       context: context,
@@ -216,6 +229,16 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
                             if (val != null) setState(() => role = val);
                           },
                         ),
+                        if (role == 'staff') ...[
+                          const SizedBox(height: 16),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text('Field Staff', style: GoogleFonts.plusJakartaSans(fontSize: 14, fontWeight: FontWeight.w600)),
+                            subtitle: Text('Enables GPS tracking & selfie checks during shift', style: GoogleFonts.plusJakartaSans(fontSize: 12)),
+                            value: isFieldStaff,
+                            onChanged: (val) => setState(() => isFieldStaff = val),
+                          ),
+                        ],
                       ],
                     ),
                   ),
@@ -231,7 +254,7 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
                     if (!formKey.currentState!.validate()) return;
 
                     Navigator.of(ctx).pop();
-                    await _updateUser(user.phoneNumber, phoneCtrl.text, nameCtrl.text, pinCtrl.text, role);
+                    await _updateUser(user.phoneNumber, phoneCtrl.text, nameCtrl.text, pinCtrl.text, role, isFieldStaff);
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: AppColors.primary,
@@ -248,7 +271,7 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
     );
   }
 
-  Future<void> _updateUser(String oldPhone, String newPhone, String name, String pin, String role) async {
+  Future<void> _updateUser(String oldPhone, String newPhone, String name, String pin, String role, bool isFieldStaff) async {
     setState(() => _isProcessing = true);
     HapticFeedback.mediumImpact();
 
@@ -260,6 +283,7 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
           'name': name,
           'pin': pin,
           'role': role,
+          'is_field_staff': isFieldStaff,
         });
       } else {
         // Create new document with new phone number (doc ID) and copy data, then delete old document
@@ -268,6 +292,7 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
           'name': name,
           'pin': pin,
           'role': role,
+          'is_field_staff': isFieldStaff,
         });
         await client.collection('telecallers').doc(oldPhone).delete();
 
@@ -419,6 +444,13 @@ class _UserManagementScreenState extends ConsumerState<UserManagementScreen> {
                       Text('📞 ${user.phoneNumber}', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppColors.textTertiary)),
                       const SizedBox(height: 2),
                       Text('🔑 PIN: ${user.pin}', style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppColors.textTertiary)),
+                      const SizedBox(height: 2),
+                      Text(
+                        user.role == 'staff'
+                            ? (user.isFieldStaff ? '🏷️ Role: Field Staff' : '🏷️ Role: Office Staff')
+                            : '🏷️ Role: ${user.role.toUpperCase()}',
+                        style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppColors.textTertiary),
+                      ),
                     ],
                   ),
                   trailing: Row(
