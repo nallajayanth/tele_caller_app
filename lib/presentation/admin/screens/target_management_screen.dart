@@ -9,25 +9,31 @@ import '../../../providers/call_log_providers.dart';
 import '../../common/widgets/success_toast.dart';
 import 'user_management_screen.dart';
 
+// State provider for selected target month/year
+final targetDateProvider = StateProvider<DateTime>((ref) => DateTime.now());
+
 // Employee target provider
 final adminTargetProvider = FutureProvider<Map<String, double>>((ref) async {
   try {
-    final now = DateTime.now();
+    final selectedDate = ref.watch(targetDateProvider);
     final snapshot = await FirebaseFirestore.instance
         .collection('monthly_targets')
-        .where('month', isEqualTo: now.month)
-        .where('year', isEqualTo: now.year)
+        .where('month', isEqualTo: selectedDate.month)
+        .where('year', isEqualTo: selectedDate.year)
         .get();
     
     final Map<String, double> targetMap = {};
     for (final doc in snapshot.docs) {
       final data = doc.data();
-      final deviceId = data['staff_device_id'] as String;
-      final targetAmount = (data['target_amount'] as num).toDouble();
-      targetMap[deviceId] = targetAmount;
+      final deviceId = data['staff_device_id'] as String?;
+      if (deviceId == null || deviceId.isEmpty) continue;
+      final targetAmount = data['target_amount'];
+      final targetVal = targetAmount is num ? targetAmount.toDouble() : 0.0;
+      targetMap[deviceId] = targetVal;
     }
     return targetMap;
-  } catch (_) {
+  } catch (e) {
+    debugPrint('Error loading admin targets: $e');
     return {};
   }
 });
@@ -51,45 +57,45 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
     super.dispose();
   }
 
-  Future<void> _saveTarget(String staffPhone, double amount) async {
+  Future<void> _saveTarget(String staffPhone, double amount, DateTime targetDate) async {
     setState(() => _savingStaffPhones.add(staffPhone));
     HapticFeedback.mediumImpact();
 
     try {
       final client = FirebaseFirestore.instance;
-      final now = DateTime.now();
       
       // UUID format of staff device ID based on phone number
       final staffDeviceId = '00000000-0000-0000-0000-${staffPhone.padLeft(12, '0')}';
+      final docId = '${staffDeviceId}_${targetDate.year}_${targetDate.month}';
 
-      // Check if target already exists
+      final batch = client.batch();
+
+      // Find any existing docs for this staff/month/year to clean duplicates
       final snapshot = await client
           .collection('monthly_targets')
           .where('staff_device_id', isEqualTo: staffDeviceId)
-          .where('month', isEqualTo: now.month)
-          .where('year', isEqualTo: now.year)
-          .limit(1)
+          .where('month', isEqualTo: targetDate.month)
+          .where('year', isEqualTo: targetDate.year)
           .get();
 
-      if (snapshot.docs.isEmpty) {
-        // Insert
-        final docRef = client.collection('monthly_targets').doc();
-        await docRef.set({
-          'id': docRef.id,
-          'staff_device_id': staffDeviceId,
-          'month': now.month,
-          'year': now.year,
-          'target_amount': amount,
-          'set_at': DateTime.now().toIso8601String(),
-        });
-      } else {
-        // Update
-        final docId = snapshot.docs.first.id;
-        await client.collection('monthly_targets').doc(docId).update({
-          'target_amount': amount,
-          'set_at': DateTime.now().toIso8601String(),
-        });
+      // Delete all existing ones
+      for (final doc in snapshot.docs) {
+        batch.delete(doc.reference);
       }
+
+      // Set the new deterministic document
+      final docRef = client.collection('monthly_targets').doc(docId);
+      batch.set(docRef, {
+        'id': docId,
+        'staff_device_id': staffDeviceId,
+        'staff_phone': staffPhone,
+        'month': targetDate.month,
+        'year': targetDate.year,
+        'target_amount': amount,
+        'set_at': DateTime.now().toIso8601String(),
+      });
+
+      await batch.commit();
 
       // Refresh providers
       ref.invalidate(adminTargetProvider);
@@ -116,10 +122,11 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
 
+    final selectedDate = ref.watch(targetDateProvider);
     final employeesAsync = ref.watch(employeesProvider);
     final targetsAsync = ref.watch(adminTargetProvider);
 
-    final currentMonthName = DateFormat('MMMM yyyy').format(DateTime.now());
+    final currentMonthName = DateFormat('MMMM yyyy').format(selectedDate);
 
     return Scaffold(
       appBar: AppBar(
@@ -168,6 +175,43 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
                     ),
                   ),
                   const SizedBox(height: 20),
+                  // Month Selector Card
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                    decoration: BoxDecoration(
+                      color: cardColor,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: isDark ? AppColors.borderDark : AppColors.border),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.arrow_back_ios_rounded, size: 18, color: AppColors.primary),
+                          onPressed: () {
+                            final prev = DateTime(selectedDate.year, selectedDate.month - 1);
+                            ref.read(targetDateProvider.notifier).state = prev;
+                          },
+                        ),
+                        Text(
+                          currentMonthName,
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w800,
+                            color: AppColors.primary,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.arrow_forward_ios_rounded, size: 18, color: AppColors.primary),
+                          onPressed: () {
+                            final next = DateTime(selectedDate.year, selectedDate.month + 1);
+                            ref.read(targetDateProvider.notifier).state = next;
+                          },
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 20),
                   Text(
                     'Targets for $currentMonthName',
                     style: GoogleFonts.plusJakartaSans(fontSize: 15, fontWeight: FontWeight.w700),
@@ -176,18 +220,18 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
                   ...staffMembers.map((staff) {
                     final deviceId = '00000000-0000-0000-0000-${staff.phoneNumber.padLeft(12, '0')}';
                     final currentTarget = targetsMap[deviceId] ?? 0.0;
+                    final key = '${staff.phoneNumber}_${selectedDate.year}_${selectedDate.month}';
 
-                    if (!_controllers.containsKey(staff.phoneNumber)) {
-                      _controllers[staff.phoneNumber] = TextEditingController(
+                    if (!_controllers.containsKey(key)) {
+                      _controllers[key] = TextEditingController(
                         text: currentTarget > 0 ? currentTarget.toStringAsFixed(0) : '',
                       );
                     }
 
-                    final controller = _controllers[staff.phoneNumber]!;
+                    final controller = _controllers[key]!;
+                    final isThisSaving = _savingStaffPhones.contains(staff.phoneNumber);
 
-                                final isThisSaving = _savingStaffPhones.contains(staff.phoneNumber);
-
-                                return Card(
+                    return Card(
                       margin: const EdgeInsets.only(bottom: 12),
                       color: cardColor,
                       shape: RoundedRectangleBorder(
@@ -288,7 +332,7 @@ class _TargetManagementScreenState extends ConsumerState<TargetManagementScreen>
                                           ? null
                                           : () {
                                               final val = double.tryParse(controller.text) ?? 0.0;
-                                              _saveTarget(staff.phoneNumber, val);
+                                              _saveTarget(staff.phoneNumber, val, selectedDate);
                                             },
                                       style: ElevatedButton.styleFrom(
                                         backgroundColor: Colors.transparent,

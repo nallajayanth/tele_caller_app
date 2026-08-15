@@ -215,23 +215,23 @@ final ordersByStatusProvider = Provider.family<List<OrderModel>, String>((ref, s
   );
 });
 
-class DailyOrderStats {
-  final int newOrdersToday;
+class OrderPipelineStats {
+  final int newOrdersCount;
   final int pendingDispatch;
-  final int packedToday;
-  final int dispatchedToday;
+  final int packedCount;
+  final int dispatchedCount;
   final int exceeded24h;
 
-  const DailyOrderStats({
-    required this.newOrdersToday,
+  const OrderPipelineStats({
+    required this.newOrdersCount,
     required this.pendingDispatch,
-    required this.packedToday,
-    required this.dispatchedToday,
+    required this.packedCount,
+    required this.dispatchedCount,
     required this.exceeded24h,
   });
 }
 
-final globalOrderStatsProvider = Provider<DailyOrderStats>((ref) {
+final globalOrderStatsProvider = Provider<OrderPipelineStats>((ref) {
   final ordersAsync = ref.watch(ordersProvider);
   return ordersAsync.maybeWhen(
     data: (orders) {
@@ -264,25 +264,25 @@ final globalOrderStatsProvider = Provider<DailyOrderStats>((ref) {
         }
       }
 
-      return DailyOrderStats(
-        newOrdersToday: newOrders,
+      return OrderPipelineStats(
+        newOrdersCount: newOrders,
         pendingDispatch: pending,
-        packedToday: packed,
-        dispatchedToday: dispatched,
+        packedCount: packed,
+        dispatchedCount: dispatched,
         exceeded24h: exceeded,
       );
     },
-    orElse: () => const DailyOrderStats(
-      newOrdersToday: 0,
+    orElse: () => const OrderPipelineStats(
+      newOrdersCount: 0,
       pendingDispatch: 0,
-      packedToday: 0,
-      dispatchedToday: 0,
+      packedCount: 0,
+      dispatchedCount: 0,
       exceeded24h: 0,
     ),
   );
 });
 
-final staffOrderStatsProvider = Provider<DailyOrderStats>((ref) {
+final staffOrderStatsProvider = Provider<OrderPipelineStats>((ref) {
   final ordersAsync = ref.watch(ordersProvider);
   final deviceId = ref.watch(deviceIdProvider);
   return ordersAsync.maybeWhen(
@@ -318,19 +318,69 @@ final staffOrderStatsProvider = Provider<DailyOrderStats>((ref) {
         }
       }
 
-      return DailyOrderStats(
-        newOrdersToday: newOrders,
+      return OrderPipelineStats(
+        newOrdersCount: newOrders,
         pendingDispatch: pending,
-        packedToday: packed,
-        dispatchedToday: dispatched,
+        packedCount: packed,
+        dispatchedCount: dispatched,
         exceeded24h: exceeded,
       );
     },
-    orElse: () => const DailyOrderStats(
-      newOrdersToday: 0,
+    orElse: () => const OrderPipelineStats(
+      newOrdersCount: 0,
       pendingDispatch: 0,
-      packedToday: 0,
-      dispatchedToday: 0,
+      packedCount: 0,
+      dispatchedCount: 0,
+      exceeded24h: 0,
+    ),
+  );
+});
+
+final staffMonthlyOrderStatsProvider = Provider<OrderPipelineStats>((ref) {
+  final ordersAsync = ref.watch(ordersProvider);
+  final deviceId = ref.watch(deviceIdProvider);
+  return ordersAsync.maybeWhen(
+    data: (orders) {
+      final now = DateTime.now();
+      int newOrders = 0;
+      int pending = 0;
+      int packed = 0;
+      int dispatched = 0;
+
+      final myOrders = orders.where((o) => o.assignedStaffDeviceId == deviceId);
+
+      for (final o in myOrders) {
+        final isCreatedThisMonth = o.createdAt.year == now.year && o.createdAt.month == now.month;
+        final isUpdatedThisMonth = o.updatedAt.year == now.year && o.updatedAt.month == now.month;
+        final status = o.status.toLowerCase();
+
+        if (status == 'received' && isCreatedThisMonth) {
+          newOrders++;
+        }
+        if (status == 'packed') {
+          pending++;
+        }
+        if ((status == 'packed' || status == 'dispatched') && isUpdatedThisMonth) {
+          packed++;
+        }
+        if (status == 'dispatched' && isUpdatedThisMonth) {
+          dispatched++;
+        }
+      }
+
+      return OrderPipelineStats(
+        newOrdersCount: newOrders,
+        pendingDispatch: pending,
+        packedCount: packed,
+        dispatchedCount: dispatched,
+        exceeded24h: 0,
+      );
+    },
+    orElse: () => const OrderPipelineStats(
+      newOrdersCount: 0,
+      pendingDispatch: 0,
+      packedCount: 0,
+      dispatchedCount: 0,
       exceeded24h: 0,
     ),
   );

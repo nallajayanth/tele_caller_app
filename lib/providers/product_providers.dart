@@ -585,21 +585,21 @@ class ProductsNotifier
     }
   }
 
-  Future<bool> addProduct(ProductModel product) async {
+  Future<String?> addProduct(ProductModel product) async {
     try {
       await FirebaseFirestore.instance
           .collection('products')
           .doc(product.id)
           .set(product.toJson());
       await loadProducts();
-      return true;
+      return null;
     } catch (e) {
       debugPrint('Add product failed: $e');
-      return false;
+      return e.toString();
     }
   }
 
-  Future<bool> updateProduct(ProductModel product) async {
+  Future<String?> updateProduct(ProductModel product) async {
     try {
       await FirebaseFirestore.instance
           .collection('products')
@@ -610,10 +610,10 @@ class ProductsNotifier
             'stock': product.stock,
           });
       await loadProducts();
-      return true;
+      return null;
     } catch (e) {
       debugPrint('Update product failed: $e');
-      return false;
+      return e.toString();
     }
   }
 

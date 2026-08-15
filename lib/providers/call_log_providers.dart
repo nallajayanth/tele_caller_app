@@ -10,8 +10,10 @@ import '../data/models/order_model.dart';
 import '../data/repositories/call_log_repository_impl.dart';
 import '../domain/repositories/call_log_repository.dart';
 import '../core/services/fcm_service.dart';
+import '../core/services/stock_service.dart';
 import 'auth_providers.dart';
 import 'order_providers.dart';
+import 'product_providers.dart';
 
 const _uuid = Uuid();
 
@@ -167,6 +169,10 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
           'updated_at': DateTime.now().toIso8601String(),
         });
 
+        // Decrement stock for the new order
+        await StockService.adjustStockForNewOrder(log.product);
+        _ref.invalidate(productsProvider);
+
         // Notify Admins about the new order
         FCMService.instance.notifyAdminsOfNewOrder(
           deviceId: log.deviceId,
@@ -184,40 +190,59 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
 
   Future<bool> updateLog(CallLogModel log) async {
     try {
+      // Get the existing log first to compare products/quantities!
+      final doc = await FirebaseFirestore.instance.collection('call_logs').doc(log.id).get();
+      final oldProduct = doc.exists ? (doc.data()?['product'] as String? ?? '') : '';
+
       await _repository.updateLog(log);
-      if (log.product.isNotEmpty) {
+      if (log.product.isNotEmpty || oldProduct.isNotEmpty) {
         final client = FirebaseFirestore.instance;
         final docRef = client.collection('orders').doc(log.id);
-        final doc = await docRef.get();
+        final orderDoc = await docRef.get();
         final orderData = {
           'customer_name': log.customerName,
           'product': log.product,
           'order_value': log.orderValue,
           'updated_at': DateTime.now().toIso8601String(),
         };
-        if (!doc.exists) {
-          await docRef.set({
-            'id': log.id,
-            'call_log_id': log.id,
-            'customer_name': log.customerName,
-            'product': log.product,
-            'order_value': log.orderValue,
-            'status': 'received',
-            'assigned_staff_device_id': log.deviceId,
-            'created_at': DateTime.now().toIso8601String(),
-            'updated_at': DateTime.now().toIso8601String(),
-          });
+        if (!orderDoc.exists) {
+          if (log.product.isNotEmpty) {
+            await docRef.set({
+              'id': log.id,
+              'call_log_id': log.id,
+              'customer_name': log.customerName,
+              'product': log.product,
+              'order_value': log.orderValue,
+              'status': 'received',
+              'assigned_staff_device_id': log.deviceId,
+              'created_at': DateTime.now().toIso8601String(),
+              'updated_at': DateTime.now().toIso8601String(),
+            });
 
-          // Notify Admins about the new order
-          FCMService.instance.notifyAdminsOfNewOrder(
-            deviceId: log.deviceId,
-            customerName: log.customerName,
-            product: log.product,
-            orderValue: log.orderValue,
-          );
+            // Adjust stock for new order document creation
+            await StockService.adjustStockForNewOrder(log.product);
+
+            // Notify Admins about the new order
+            FCMService.instance.notifyAdminsOfNewOrder(
+              deviceId: log.deviceId,
+              customerName: log.customerName,
+              product: log.product,
+              orderValue: log.orderValue,
+            );
+          }
         } else {
-          await docRef.update(orderData);
+          // The order already exists.
+          if (log.product.isEmpty) {
+            // Order was removed (e.g. products cleared or status changed)
+            await docRef.delete();
+            await StockService.adjustStockForOrderDeletion(oldProduct);
+          } else {
+            // Update order and adjust stock differences
+            await docRef.update(orderData);
+            await StockService.adjustStockForOrderUpdate(oldProduct, log.product);
+          }
         }
+        _ref.invalidate(productsProvider);
       }
       await loadLogs();
       return true;
@@ -228,8 +253,18 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
 
   Future<bool> deleteLog(String id) async {
     try {
+      // Get the log to check if it had products
+      final doc = await FirebaseFirestore.instance.collection('call_logs').doc(id).get();
+      final product = doc.exists ? (doc.data()?['product'] as String? ?? '') : '';
+
       await FirebaseFirestore.instance.collection('orders').doc(id).delete();
       await _repository.deleteLog(id);
+      
+      if (product.isNotEmpty) {
+        await StockService.adjustStockForOrderDeletion(product);
+        _ref.invalidate(productsProvider);
+      }
+
       await loadLogs();
       return true;
     } catch (_) {
@@ -518,7 +553,8 @@ final staffMonthlyTargetProvider = FutureProvider<double>((ref) async {
       if (targetDeviceId == currentDeviceId ||
           targetDeviceId == phoneDeviceId ||
           (userPhone.isNotEmpty && targetPhone == userPhone)) {
-        return (data['target_amount'] as num).toDouble();
+        final targetAmount = data['target_amount'];
+        return targetAmount is num ? targetAmount.toDouble() : 0.0;
       }
     }
     return 0.0;

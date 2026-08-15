@@ -35,7 +35,9 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
     try {
       final activeUser = ref.read(activeUserProvider);
       final staffName = activeUser?.name ?? 'Staff';
-      final dailyStats = ref.read(staffOrderStatsProvider);
+      final pipelineStats = isDaily
+          ? ref.read(staffOrderStatsProvider)
+          : ref.read(staffMonthlyOrderStatsProvider);
       final logsAsync = ref.read(staffLogsProvider);
 
       final now = DateTime.now();
@@ -69,7 +71,7 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
         achieved: achieved,
         remaining: remaining,
         percent: percent,
-        dailyStats: dailyStats,
+        pipelineStats: pipelineStats,
         logs: filteredLogs,
       );
     } catch (e) {
@@ -96,6 +98,7 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
     final dailyTarget = ref.watch(staffDailyTargetProvider);
     final dailyAchievement = ref.watch(staffDailyAchievementProvider);
     final dailyStats = ref.watch(staffOrderStatsProvider);
+    final monthlyStats = ref.watch(staffMonthlyOrderStatsProvider);
 
     final now = DateTime.now();
     final dateStr = DateFormat('dd MMM yyyy').format(now);
@@ -161,7 +164,12 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
                 ),
               ),
               const SizedBox(height: 16),
-              _buildDailyOrderStats(context, isDark, dailyStats),
+              _buildOrderPipeline(
+                context: context,
+                isDark: isDark,
+                stats: dailyStats,
+                isDaily: true,
+              ),
               const SizedBox(height: 16),
               _buildPerformanceCircleCard(
                 context: context,
@@ -190,6 +198,13 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
                   achieved: monthlyAchievement,
                   periodTitle: 'Monthly Sales Performance Report ($monthStr)',
                 ),
+              ),
+              const SizedBox(height: 16),
+              _buildOrderPipeline(
+                context: context,
+                isDark: isDark,
+                stats: monthlyStats,
+                isDaily: false,
               ),
               const SizedBox(height: 16),
               _buildPerformanceCircleCard(
@@ -540,14 +555,18 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
     return NumberFormat('#,##,###').format(amount);
   }
 
-  Widget _buildDailyOrderStats(
-      BuildContext context, bool isDark, DailyOrderStats stats) {
+  Widget _buildOrderPipeline({
+    required BuildContext context,
+    required bool isDark,
+    required OrderPipelineStats stats,
+    required bool isDaily,
+  }) {
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
-          'TODAY\'S ORDER PIPELINE',
+          isDaily ? 'TODAY\'S ORDER PIPELINE' : 'MONTHLY ORDER PIPELINE',
           style: GoogleFonts.plusJakartaSans(
             fontSize: 10,
             fontWeight: FontWeight.w800,
@@ -560,8 +579,8 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
           children: [
             Expanded(
               child: _OrderStatCard(
-                label: 'New Today',
-                value: stats.newOrdersToday.toString(),
+                label: isDaily ? 'New Today' : 'New This Month',
+                value: stats.newOrdersCount.toString(),
                 color: const Color(0xFF3B82F6),
                 icon: Icons.new_releases_rounded,
                 isDark: isDark,
@@ -582,8 +601,8 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
             const SizedBox(width: 8),
             Expanded(
               child: _OrderStatCard(
-                label: 'Packed',
-                value: stats.packedToday.toString(),
+                label: isDaily ? 'Packed' : 'Packed This Month',
+                value: stats.packedCount.toString(),
                 color: const Color(0xFF8B5CF6),
                 icon: Icons.inventory_2_rounded,
                 isDark: isDark,
@@ -593,8 +612,8 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
             const SizedBox(width: 8),
             Expanded(
               child: _OrderStatCard(
-                label: 'Dispatched',
-                value: stats.dispatchedToday.toString(),
+                label: isDaily ? 'Dispatched' : 'Dispatched This Month',
+                value: stats.dispatchedCount.toString(),
                 color: const Color(0xFF10B981),
                 icon: Icons.local_shipping_rounded,
                 isDark: isDark,

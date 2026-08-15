@@ -796,7 +796,7 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
 
 
 
-  Widget _buildDailyOrderStats(BuildContext context, bool isDark, DailyOrderStats stats, LogFilterState filter) {
+  Widget _buildDailyOrderStats(BuildContext context, bool isDark, OrderPipelineStats stats, LogFilterState filter) {
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
 
     return Padding(
@@ -824,7 +824,7 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
                   width: 88,
                   child: _OrderStatCard(
                     label: 'New Today',
-                    value: stats.newOrdersToday.toString(),
+                    value: stats.newOrdersCount.toString(),
                     color: const Color(0xFF3B82F6),
                     icon: Icons.new_releases_rounded,
                     isDark: isDark,
@@ -852,7 +852,7 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
                   width: 88,
                   child: _OrderStatCard(
                     label: 'Packed',
-                    value: stats.packedToday.toString(),
+                    value: stats.packedCount.toString(),
                     color: const Color(0xFF8B5CF6),
                     icon: Icons.inventory_2_rounded,
                     isDark: isDark,
@@ -866,7 +866,7 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
                   width: 88,
                   child: _OrderStatCard(
                     label: 'Dispatched',
-                    value: stats.dispatchedToday.toString(),
+                    value: stats.dispatchedCount.toString(),
                     color: const Color(0xFF10B981),
                     icon: Icons.local_shipping_rounded,
                     isDark: isDark,

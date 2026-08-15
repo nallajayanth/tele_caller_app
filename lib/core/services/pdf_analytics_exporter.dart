@@ -17,7 +17,7 @@ class PdfAnalyticsExporter {
     required double achieved,
     required double remaining,
     required double percent,
-    required DailyOrderStats dailyStats,
+    required OrderPipelineStats pipelineStats,
     required List<CallLogModel> logs,
   }) async {
     final pdf = pw.Document();
@@ -123,30 +123,28 @@ class PdfAnalyticsExporter {
           ),
           pw.SizedBox(height: 16),
 
-          // ── Pipeline Summary (Daily view) ────────────────────────────
-          if (isDaily) ...[
-            pw.Text(
-              'ORDER PIPELINE SUMMARY',
-              style: pw.TextStyle(
-                fontSize: 10,
-                fontWeight: pw.FontWeight.bold,
-                color: primaryColor,
-              ),
+          // ── Pipeline Summary (Daily & Monthly) ────────────────────────
+          pw.Text(
+            isDaily ? 'DAILY ORDER PIPELINE' : 'MONTHLY ORDER PIPELINE',
+            style: pw.TextStyle(
+              fontSize: 10,
+              fontWeight: pw.FontWeight.bold,
+              color: primaryColor,
             ),
-            pw.SizedBox(height: 6),
-            pw.Row(
-              children: [
-                _buildPipelineBadge('New Today', dailyStats.newOrdersToday.toString(), PdfColor.fromHex('#3B82F6')),
-                pw.SizedBox(width: 8),
-                _buildPipelineBadge('Pending', dailyStats.pendingDispatch.toString(), PdfColor.fromHex('#F59E0B')),
-                pw.SizedBox(width: 8),
-                _buildPipelineBadge('Packed', dailyStats.packedToday.toString(), PdfColor.fromHex('#8B5CF6')),
-                pw.SizedBox(width: 8),
-                _buildPipelineBadge('Dispatched', dailyStats.dispatchedToday.toString(), PdfColor.fromHex('#10B981')),
-              ],
-            ),
-            pw.SizedBox(height: 16),
-          ],
+          ),
+          pw.SizedBox(height: 6),
+          pw.Row(
+            children: [
+              _buildPipelineBadge(isDaily ? 'New Today' : 'New This Month', pipelineStats.newOrdersCount.toString(), PdfColor.fromHex('#3B82F6')),
+              pw.SizedBox(width: 8),
+              _buildPipelineBadge('Pending', pipelineStats.pendingDispatch.toString(), PdfColor.fromHex('#F59E0B')),
+              pw.SizedBox(width: 8),
+              _buildPipelineBadge(isDaily ? 'Packed' : 'Packed This Month', pipelineStats.packedCount.toString(), PdfColor.fromHex('#8B5CF6')),
+              pw.SizedBox(width: 8),
+              _buildPipelineBadge(isDaily ? 'Dispatched' : 'Dispatched This Month', pipelineStats.dispatchedCount.toString(), PdfColor.fromHex('#10B981')),
+            ],
+          ),
+          pw.SizedBox(height: 16),
 
           // ── Call Logs Table ──────────────────────────────────────────
           pw.Text(

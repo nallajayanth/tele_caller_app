@@ -103,7 +103,7 @@ class _ProductManagementScreenState extends ConsumerState<ProductManagementScree
                           final price = double.tryParse(priceCtrl.text.trim()) ?? 0.0;
                           final stock = int.tryParse(stockCtrl.text.trim()) ?? 0;
 
-                          bool success;
+                          String? error;
                           if (existingProduct == null) {
                             final newProduct = ProductModel(
                               id: const Uuid().v4(),
@@ -111,28 +111,31 @@ class _ProductManagementScreenState extends ConsumerState<ProductManagementScree
                               price: price,
                               stock: stock,
                             );
-                            success = await ref.read(productsProvider.notifier).addProduct(newProduct);
+                            error = await ref.read(productsProvider.notifier).addProduct(newProduct);
                           } else {
                             final updated = existingProduct.copyWith(
                               name: name,
                               price: price,
                               stock: stock,
                             );
-                            success = await ref.read(productsProvider.notifier).updateProduct(updated);
+                            error = await ref.read(productsProvider.notifier).updateProduct(updated);
                           }
 
                           setDialogState(() => _isProcessing = false);
                           if (mounted && context.mounted) {
                             setState(() => _isProcessing = false);
                             Navigator.of(ctx).pop();
-                            if (success) {
+                            if (error == null) {
                               SuccessToast.show(
                                 context,
                                 message: existingProduct == null ? 'Product added successfully!' : 'Product updated successfully!',
                               );
                             } else {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('Failed to save product config.')),
+                                SnackBar(
+                                  content: Text('Failed to save product config: $error'),
+                                  backgroundColor: AppColors.error,
+                                ),
                               );
                             }
                           }
