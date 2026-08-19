@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -6,6 +7,8 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import 'package:uuid/uuid.dart';
+import 'package:image_picker/image_picker.dart';
+import 'package:geolocator/geolocator.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../data/models/call_log_model.dart';
@@ -13,6 +16,7 @@ import '../../../data/models/product_model.dart';
 import '../../../providers/product_providers.dart';
 import '../../../providers/auth_providers.dart';
 import '../../../providers/call_log_providers.dart';
+import '../../../providers/visit_providers.dart';
 import '../../common/widgets/premium_button.dart';
 import '../../common/widgets/status_chip_selector.dart';
 import '../../common/widgets/success_toast.dart';
@@ -59,6 +63,14 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
   String? _selectedStandardRemark;
   bool _showCustomRemarksField = false;
 
+  File? _capturedImage;
+  TimeOfDay _arrivalTime = TimeOfDay.fromDateTime(DateTime.now().subtract(const Duration(minutes: 30)));
+  TimeOfDay _departureTime = TimeOfDay.now();
+  double? _capturedLat;
+  double? _capturedLng;
+  bool _isFetchingGps = false;
+  String _gpsStatus = 'Captured (Accurate)';
+
   Map<String, _ProductSelection> _selectedProducts = {};
 
   @override
@@ -66,6 +78,7 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
     super.initState();
     _orderCtrl.addListener(_updateAmountDue);
     _amountReceivedCtrl.addListener(_updateAmountDue);
+    _fetchGps();
   }
 
   void _updateAmountDue() {
@@ -146,7 +159,384 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
     }
   }
 
+  Future<void> _fetchGps() async {
+    if (!mounted) return;
+    setState(() {
+      _isFetchingGps = true;
+      _gpsStatus = 'Locating...';
+    });
+    try {
+      Position? pos;
+      bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (serviceEnabled) {
+        LocationPermission perm = await Geolocator.checkPermission();
+        if (perm == LocationPermission.denied) {
+          perm = await Geolocator.requestPermission();
+        }
+        if (perm != LocationPermission.denied && perm != LocationPermission.deniedForever) {
+          try {
+            pos = await Geolocator.getCurrentPosition(
+              desiredAccuracy: LocationAccuracy.high,
+              timeLimit: const Duration(seconds: 8),
+            );
+          } catch (_) {
+            pos = await Geolocator.getLastKnownPosition();
+          }
+        }
+      }
+      if (pos != null) {
+        if (mounted) {
+          setState(() {
+            _capturedLat = pos!.latitude;
+            _capturedLng = pos.longitude;
+            _gpsStatus = 'Captured (Accurate)';
+            _isFetchingGps = false;
+          });
+        }
+      } else {
+        if (mounted) {
+          setState(() {
+            _gpsStatus = 'GPS Signal Weak';
+            _isFetchingGps = false;
+          });
+        }
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _gpsStatus = 'GPS Error';
+          _isFetchingGps = false;
+        });
+      }
+    }
+  }
+
+  String _calculateVisitDuration() {
+    final now = DateTime.now();
+    final arrivalDt = DateTime(now.year, now.month, now.day, _arrivalTime.hour, _arrivalTime.minute);
+    var departureDt = DateTime(now.year, now.month, now.day, _departureTime.hour, _departureTime.minute);
+    if (departureDt.isBefore(arrivalDt)) {
+      departureDt = departureDt.add(const Duration(days: 1));
+    }
+    final diffMinutes = departureDt.difference(arrivalDt).inMinutes;
+    if (diffMinutes <= 0) return '0 Minutes';
+    if (diffMinutes < 60) return '$diffMinutes Minutes';
+    final hrs = diffMinutes ~/ 60;
+    final mins = diffMinutes % 60;
+    return mins > 0 ? '$hrs hr $mins mins' : '$hrs hr';
+  }
+
+  Future<void> _takePhoto() async {
+    try {
+      HapticFeedback.lightImpact();
+      final picker = ImagePicker();
+      final picked = await picker.pickImage(
+        source: ImageSource.camera,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        imageQuality: 85,
+      );
+      if (picked != null && mounted) {
+        setState(() {
+          _capturedImage = File(picked.path);
+        });
+      }
+    } catch (e) {
+      debugPrint('Camera capture failed: $e');
+    }
+  }
+
+  Widget _buildGpsAutoCapture(BuildContext context, bool isDark) {
+    final latStr = _capturedLat?.toStringAsFixed(4) ?? '28.6139';
+    final lngStr = _capturedLng?.toStringAsFixed(4) ?? '77.2090';
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: AppColors.primary.withValues(alpha: isDark ? 0.15 : 0.08),
+        borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+        border: Border.all(
+          color: AppColors.primary.withValues(alpha: 0.3),
+          width: 1,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.location_on_rounded, color: AppColors.primary, size: 20),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'GPS Auto Capture',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w700,
+                    color: isDark ? Colors.white : AppColors.textPrimary,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'GPS Status: $_gpsStatus',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary,
+                  ),
+                ),
+                Text(
+                  '[e.g., $latStr, $lngStr]',
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 11,
+                    color: isDark ? Colors.white60 : AppColors.textTertiary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          IconButton(
+            onPressed: _isFetchingGps ? null : _fetchGps,
+            icon: _isFetchingGps
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                  )
+                : const Icon(Icons.refresh_rounded, color: AppColors.primary, size: 20),
+            tooltip: 'Refresh GPS',
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildVisitTimingSection(BuildContext context, bool isDark, Color cardColor) {
+    return _SectionCard(
+      color: cardColor,
+      title: 'Visit Timing *',
+      icon: Icons.access_time_rounded,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () async {
+                  final picked = await showTimePicker(
+                    context: context,
+                    initialTime: _arrivalTime,
+                  );
+                  if (picked != null) setState(() => _arrivalTime = picked);
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Arrival Time *',
+                    prefixIcon: Icon(Icons.schedule_rounded, size: 18, color: AppColors.textTertiary),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _arrivalTime.format(context),
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : AppColors.textPrimary,
+                        ),
+                      ),
+                      const Icon(Icons.arrow_drop_down, color: AppColors.textTertiary),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: GestureDetector(
+                onTap: () async {
+                  final picked = await showTimePicker(
+                    context: context,
+                    initialTime: _departureTime,
+                  );
+                  if (picked != null) setState(() => _departureTime = picked);
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Departure Time *',
+                    prefixIcon: Icon(Icons.schedule_rounded, size: 18, color: AppColors.textTertiary),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _departureTime.format(context),
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : AppColors.textPrimary,
+                        ),
+                      ),
+                      const Icon(Icons.arrow_drop_down, color: AppColors.textTertiary),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        InputDecorator(
+          decoration: const InputDecoration(
+            labelText: 'Visit Duration',
+            prefixIcon: Icon(Icons.timer_outlined, size: 18, color: AppColors.textTertiary),
+            filled: true,
+          ),
+          child: Text(
+            _calculateVisitDuration(),
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white70 : AppColors.textSecondary,
+            ),
+          ),
+        ),
+      ],
+    ).animate().fadeIn(delay: 100.ms).slideY(begin: 0.1);
+  }
+
+  Widget _buildPhotoProofSection(BuildContext context, bool isDark, Color cardColor) {
+    return _SectionCard(
+      color: cardColor,
+      title: 'Photo Proof *',
+      icon: Icons.camera_alt_rounded,
+      children: [
+        GestureDetector(
+          onTap: _takePhoto,
+          child: Container(
+            width: double.infinity,
+            height: 160,
+            decoration: BoxDecoration(
+              color: isDark ? Colors.white.withValues(alpha: 0.04) : Colors.black.withValues(alpha: 0.02),
+              borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+              border: Border.all(
+                color: _capturedImage != null ? AppColors.success : AppColors.textTertiary.withValues(alpha: 0.4),
+                width: 1.5,
+              ),
+            ),
+            child: _capturedImage != null
+                ? Stack(
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(AppSpacing.cardRadius - 1),
+                        child: Image.file(
+                          _capturedImage!,
+                          width: double.infinity,
+                          height: 160,
+                          fit: BoxFit.cover,
+                        ),
+                      ),
+                      Positioned(
+                        top: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.all(6),
+                          decoration: const BoxDecoration(
+                            color: AppColors.success,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.check_rounded, color: Colors.white, size: 18),
+                        ),
+                      ),
+                      Positioned(
+                        bottom: 8,
+                        right: 8,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.7),
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.camera_alt_rounded, color: Colors.white, size: 14),
+                              const SizedBox(width: 4),
+                              Text(
+                                'Retake',
+                                style: GoogleFonts.plusJakartaSans(
+                                  color: Colors.white,
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  )
+                : Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.1),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(Icons.camera_alt_rounded, size: 32, color: AppColors.primary),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        'Tap to capture Mandatory Photo Proof *',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                          color: isDark ? Colors.white : AppColors.textPrimary,
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'A clear photo of the customer/location is mandatory.',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 11,
+            color: isDark ? Colors.white60 : AppColors.textTertiary,
+          ),
+        ),
+      ],
+    ).animate().fadeIn(delay: 140.ms).slideY(begin: 0.1);
+  }
+
   Future<void> _submit() async {
+    final activeUser = ref.read(activeUserProvider);
+    final isField = activeUser != null && activeUser.role == 'staff' && activeUser.isFieldStaff;
+
+    if (isField && _capturedImage == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            'Mandatory: Photo proof with camera required for visit verification.',
+            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+          ),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+        ),
+      );
+      return;
+    }
+
     final bool statusMissing = _selectedStatus == null;
     if (statusMissing) {
       setState(() => _statusError = true);
@@ -226,11 +616,28 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
     );
 
     final success = await ref.read(callLogsProvider.notifier).addLog(log);
+
+    if (isField) {
+      await ref.read(visitsProvider.notifier).logVisit(
+        customerName: _nameCtrl.text.trim(),
+        customerType: 'doctor',
+        address: _placeCtrl.text.trim(),
+        remarks: _showCustomRemarksField ? _remarksCtrl.text.trim() : (_selectedStandardRemark ?? _responseCtrl.text.trim()),
+        nextFollowUpDate: DateFormat('yyyy-MM-dd').format(_followUpDate),
+        photoUrl: _capturedImage?.path,
+      );
+    }
+
     setState(() => _isSubmitting = false);
 
     if (success) {
       _clearForm();
-      if (mounted) SuccessToast.show(context, message: 'Call log saved successfully!');
+      if (mounted) {
+        SuccessToast.show(
+          context,
+          message: isField ? 'Visit log saved successfully!' : 'Call log saved successfully!',
+        );
+      }
     } else {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -268,6 +675,7 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
       _selectedStandardRemark = null;
       _showCustomRemarksField = false;
       _selectedProducts = {};
+      _capturedImage = null;
     });
   }
 
@@ -533,6 +941,9 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
     final attendance = attendanceAsync.valueOrNull;
     final isShiftActive = attendance != null && attendance.isActive;
 
+    final activeUser = ref.watch(activeUserProvider);
+    final isField = activeUser != null && activeUser.role == 'staff' && activeUser.isFieldStaff;
+
     return Form(
       key: _formKey,
       child: ListView(
@@ -546,399 +957,410 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
             _buildBlocker(context, isDark, cardColor),
           ] else ...[
             _SectionCard(
-            color: cardColor,
-            title: 'Customer Info',
-            icon: Icons.person_rounded,
-            children: [
-              _Field(
-                key: _nameKey,
-                focusNode: _nameFocus,
-                controller: _nameCtrl,
-                label: 'Customer Name *',
-                hint: 'Doctor / Retail Pharmacy',
-                icon: Icons.store_rounded,
-                validator: (v) =>
-                    v == null || v.trim().isEmpty ? 'Required' : null,
-              ),
-              const SizedBox(height: 14),
-              _Field(
-                controller: _clinicCtrl,
-                label: 'Clinic Name (Optional)',
-                hint: 'Clinic / Hospital name',
-                icon: Icons.local_hospital_rounded,
-                validator: null,
-              ),
-              const SizedBox(height: 14),
-              _Field(
-                key: _mobileKey,
-                focusNode: _mobileFocus,
-                controller: _mobileCtrl,
-                label: 'Mobile Number *',
-                hint: '10-digit mobile',
-                icon: Icons.phone_rounded,
-                keyboardType: TextInputType.phone,
-                inputFormatters: [
-                  FilteringTextInputFormatter.digitsOnly,
-                  LengthLimitingTextInputFormatter(10),
-                ],
-                validator: (v) {
-                  if (v == null || v.trim().isEmpty) return 'Required';
-                  if (v.trim().length != 10) return 'Enter valid 10-digit number';
-                  return null;
-                },
-              ),
-              const SizedBox(height: 14),
-              _Field(
-                controller: _placeCtrl,
-                label: 'Place / Market Area (Optional)',
-                hint: 'City, region or address details',
-                icon: Icons.location_on_rounded,
-                minLines: 2,
-                maxLines: 4,
-                keyboardType: TextInputType.multiline,
-                validator: null,
-              ),
-            ],
-          ).animate().fadeIn(delay: 80.ms).slideY(begin: 0.1),
-
-          const SizedBox(height: 14),
-
-          _SectionCard(
-            key: _statusKey,
-            color: cardColor,
-            title: 'Call Status *',
-            icon: Icons.signal_cellular_alt_rounded,
-            children: [
-              DropdownButtonFormField<String>(
-                initialValue: _selectedStatus,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Select Call Status *',
-                  prefixIcon: Icon(Icons.signal_cellular_alt_rounded,
-                      color: AppColors.textTertiary, size: 20),
+              color: cardColor,
+              title: isField ? 'Customer Info & Visit Details *' : 'Customer Info',
+              icon: Icons.person_rounded,
+              children: [
+                _Field(
+                  key: _nameKey,
+                  focusNode: _nameFocus,
+                  controller: _nameCtrl,
+                  label: isField ? 'Customer/Doctor/Shop Name *' : 'Customer Name *',
+                  hint: 'Doctor / Retail Pharmacy',
+                  icon: Icons.store_rounded,
+                  validator: (v) =>
+                      v == null || v.trim().isEmpty ? 'Required' : null,
                 ),
-                dropdownColor: cardColor,
-                style: GoogleFonts.plusJakartaSans(
-                  color: isDark ? Colors.white : AppColors.textPrimary,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w500,
-                ),
-                items: kStatusOptions.map((opt) {
-                  return DropdownMenuItem<String>(
-                    value: opt.label,
-                    child: Row(
-                      children: [
-                        Icon(opt.icon, size: 18, color: opt.color),
-                        const SizedBox(width: 10),
-                        Text(
-                          opt.label,
-                          style: GoogleFonts.plusJakartaSans(
-                            color: isDark ? Colors.white : AppColors.textPrimary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                }).toList(),
-                onChanged: (s) {
-                  if (s != null) {
-                    setState(() {
-                      _selectedStatus = s;
-                      _statusError = false;
-                      _updateAmountDue();
-                    });
-                  }
-                },
-              ),
-              if (_statusError)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    'Please select a call status',
-                    style: TextStyle(
-                      color: AppColors.error,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ),
-            ],
-          ).animate().fadeIn(delay: 120.ms).slideY(begin: 0.1),
-
-          const SizedBox(height: 14),
-
-          _SectionCard(
-            key: _productKey,
-            color: cardColor,
-            title: 'Product (Optional)',
-            icon: Icons.medication_rounded,
-            children: [
-              _buildProductSelector(context, isDark, cardColor),
-            ],
-          ).animate().fadeIn(delay: 160.ms).slideY(begin: 0.1),
-
-          const SizedBox(height: 14),
-
-          _SectionCard(
-            color: cardColor,
-            title: 'Notes & Remarks',
-            icon: Icons.notes_rounded,
-            children: [
-              _Field(
-                controller: _responseCtrl,
-                label: 'Customer Response (Optional)',
-                hint: 'Detailed feedback from customer...',
-                icon: Icons.chat_bubble_outline_rounded,
-                maxLines: 3,
-              ),
-              const SizedBox(height: 14),
-              DropdownButtonFormField<String>(
-                initialValue: _selectedStandardRemark,
-                isExpanded: true,
-                decoration: const InputDecoration(
-                  labelText: 'Standard Remark (Optional)',
-                  prefixIcon: Icon(Icons.feedback_rounded,
-                      color: AppColors.textTertiary, size: 20),
-                ),
-                dropdownColor: cardColor,
-                style: GoogleFonts.plusJakartaSans(
-                  color: isDark ? Colors.white : AppColors.textPrimary,
-                  fontSize: 14,
-                ),
-                items: [
-                  'Prices are High',
-                  'Quality is Not Good',
-                  'Service is Not Good',
-                  'Logistics Charges are High',
-                  'Other',
-                ].map((String val) {
-                  return DropdownMenuItem<String>(
-                    value: val,
-                    child: Text(val),
-                  );
-                }).toList(),
-                onChanged: (val) {
-                  setState(() {
-                    _selectedStandardRemark = val;
-                    if (val == 'Other') {
-                      _showCustomRemarksField = true;
-                    } else {
-                      _showCustomRemarksField = false;
-                      _remarksCtrl.clear();
-                    }
-                  });
-                },
-              ),
-              if (_showCustomRemarksField) ...[
                 const SizedBox(height: 14),
                 _Field(
-                  key: _remarksKey,
-                  focusNode: _remarksFocus,
-                  controller: _remarksCtrl,
-                  label: 'Custom Remarks *',
-                  hint: 'Enter your custom notes here...',
-                  icon: Icons.edit_note_rounded,
-                  maxLines: 2,
-                  validator: (v) =>
-                      v == null || v.trim().isEmpty ? 'Required for Other' : null,
+                  controller: _clinicCtrl,
+                  label: 'Clinic Name (Optional)',
+                  hint: 'Clinic / Hospital name',
+                  icon: Icons.local_hospital_rounded,
+                  validator: null,
                 ),
+                const SizedBox(height: 14),
+                _Field(
+                  key: _mobileKey,
+                  focusNode: _mobileFocus,
+                  controller: _mobileCtrl,
+                  label: 'Mobile Number *',
+                  hint: '10-digit mobile',
+                  icon: Icons.phone_rounded,
+                  keyboardType: TextInputType.phone,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.digitsOnly,
+                    LengthLimitingTextInputFormatter(10),
+                  ],
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'Required';
+                    if (v.trim().length != 10) return 'Enter valid 10-digit number';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 14),
+                _Field(
+                  controller: _placeCtrl,
+                  label: isField ? 'Visit Address *' : 'Place / Market Area (Optional)',
+                  hint: isField ? 'Address / location details' : 'City, region or address details',
+                  icon: Icons.location_on_rounded,
+                  minLines: 2,
+                  maxLines: 4,
+                  keyboardType: TextInputType.multiline,
+                  validator: isField ? (v) => v == null || v.trim().isEmpty ? 'Required' : null : null,
+                ),
+                if (isField) ...[
+                  const SizedBox(height: 14),
+                  _buildGpsAutoCapture(context, isDark),
+                ],
               ],
+            ).animate().fadeIn(delay: 80.ms).slideY(begin: 0.1),
+
+            const SizedBox(height: 14),
+
+            if (isField) ...[
+              _buildVisitTimingSection(context, isDark, cardColor),
+              const SizedBox(height: 14),
+              _buildPhotoProofSection(context, isDark, cardColor),
+              const SizedBox(height: 14),
             ],
-          ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.1),
 
-          const SizedBox(height: 14),
-
-          _SectionCard(
-            color: cardColor,
-            title: 'Financials & Communication',
-            icon: Icons.payments_rounded,
-            children: [
-              // Order Value (Read-only / Auto-calculated from selected products)
-              TextFormField(
-                controller: _orderCtrl,
-                readOnly: true,
-                style: GoogleFonts.plusJakartaSans(
-                  fontSize: 18,
-                  fontWeight: FontWeight.w700,
-                  color: AppColors.accent,
-                ),
-                decoration: InputDecoration(
-                  labelText: 'Order Value',
-                  hintText: '0.00',
-                  hintStyle: GoogleFonts.plusJakartaSans(
-                    color: AppColors.textTertiary,
-                    fontSize: 18,
+            _SectionCard(
+              key: _statusKey,
+              color: cardColor,
+              title: 'Call Status *',
+              icon: Icons.signal_cellular_alt_rounded,
+              children: [
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedStatus,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Select Call Status *',
+                    prefixIcon: Icon(Icons.signal_cellular_alt_rounded,
+                        color: AppColors.textTertiary, size: 20),
                   ),
-                  prefixIcon: Container(
-                    padding: const EdgeInsets.only(left: 14, right: 8),
+                  dropdownColor: cardColor,
+                  style: GoogleFonts.plusJakartaSans(
+                    color: isDark ? Colors.white : AppColors.textPrimary,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w500,
+                  ),
+                  items: kStatusOptions.map((opt) {
+                    return DropdownMenuItem<String>(
+                      value: opt.label,
+                      child: Row(
+                        children: [
+                          Icon(opt.icon, size: 18, color: opt.color),
+                          const SizedBox(width: 10),
+                          Text(
+                            opt.label,
+                            style: GoogleFonts.plusJakartaSans(
+                              color: isDark ? Colors.white : AppColors.textPrimary,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (s) {
+                    if (s != null) {
+                      setState(() {
+                        _selectedStatus = s;
+                        _statusError = false;
+                        _updateAmountDue();
+                      });
+                    }
+                  },
+                ),
+                if (_statusError)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
                     child: Text(
-                      '₹',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 18,
-                        fontWeight: FontWeight.w700,
-                        color: AppColors.accent,
+                      'Please select a call status',
+                      style: TextStyle(
+                        color: AppColors.error,
+                        fontSize: 12,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),
-                  prefixIconConstraints:
-                      const BoxConstraints(minWidth: 0, minHeight: 0),
-                  filled: true,
-                  fillColor: AppColors.accent.withValues(alpha: 0.05),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
-                    borderSide: BorderSide(
-                      color: AppColors.accent.withValues(alpha: 0.3),
-                      width: 1.5,
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
-                    borderSide: BorderSide(
-                      color: AppColors.accent.withValues(alpha: 0.3),
-                      width: 1.5,
-                    ),
-                  ),
+              ],
+            ).animate().fadeIn(delay: 120.ms).slideY(begin: 0.1),
+
+            const SizedBox(height: 14),
+
+            _SectionCard(
+              key: _productKey,
+              color: cardColor,
+              title: 'Product (Optional)',
+              icon: Icons.medication_rounded,
+              children: [
+                _buildProductSelector(context, isDark, cardColor),
+              ],
+            ).animate().fadeIn(delay: 160.ms).slideY(begin: 0.1),
+
+            const SizedBox(height: 14),
+
+            _SectionCard(
+              color: cardColor,
+              title: 'Remarks & Logs *',
+              icon: Icons.notes_rounded,
+              children: [
+                _Field(
+                  controller: _responseCtrl,
+                  label: 'Customer Response / Remarks *',
+                  hint: 'Detailed feedback from customer...',
+                  icon: Icons.chat_bubble_outline_rounded,
+                  maxLines: 3,
                 ),
-                validator: (v) {
-                  if (_selectedStatus == 'Order Received') {
-                    if (v == null || v.trim().isEmpty) {
-                      return 'Required for Order Received';
-                    }
-                    final val = double.tryParse(v.replaceAll(',', ''));
-                    if (val == null || val <= 0) {
-                      return 'Must select products to generate order value';
-                    }
-                  }
-                  return null;
-                },
-              ),
-              const SizedBox(height: 14),
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: _Field(
-                      controller: _amountReceivedCtrl,
-                      label: 'Received (Optional)',
-                      hint: '0.00',
-                      icon: Icons.download_rounded,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                      ],
-                      validator: (v) {
-                        if (v != null && v.trim().isNotEmpty) {
-                          final orderVal = double.tryParse(_orderCtrl.text.replaceAll(',', '')) ?? 0.0;
-                          final amtRec = double.tryParse(v.replaceAll(',', '')) ?? 0.0;
-                          if (orderVal > 0 && amtRec > orderVal) {
-                            return 'Cannot exceed Order Value (₹${orderVal.toStringAsFixed(0)})';
-                          }
-                        }
-                        return null;
-                      },
-                    ),
+                const SizedBox(height: 14),
+                DropdownButtonFormField<String>(
+                  initialValue: _selectedStandardRemark,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'Standard Remark (Optional)',
+                    prefixIcon: Icon(Icons.feedback_rounded,
+                        color: AppColors.textTertiary, size: 20),
                   ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: _Field(
-                      controller: _amountDueCtrl,
-                      label: 'Due',
-                      hint: '0.00',
-                      icon: Icons.upload_rounded,
-                      readOnly: true,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                      ],
-                    ),
+                  dropdownColor: cardColor,
+                  style: GoogleFonts.plusJakartaSans(
+                    color: isDark ? Colors.white : AppColors.textPrimary,
+                    fontSize: 14,
+                  ),
+                  items: [
+                    'Prices are High',
+                    'Quality is Not Good',
+                    'Service is Not Good',
+                    'Logistics Charges are High',
+                    'Other',
+                  ].map((String val) {
+                    return DropdownMenuItem<String>(
+                      value: val,
+                      child: Text(val),
+                    );
+                  }).toList(),
+                  onChanged: (val) {
+                    setState(() {
+                      _selectedStandardRemark = val;
+                      if (val == 'Other') {
+                        _showCustomRemarksField = true;
+                      } else {
+                        _showCustomRemarksField = false;
+                        _remarksCtrl.clear();
+                      }
+                    });
+                  },
+                ),
+                if (_showCustomRemarksField) ...[
+                  const SizedBox(height: 14),
+                  _Field(
+                    key: _remarksKey,
+                    focusNode: _remarksFocus,
+                    controller: _remarksCtrl,
+                    label: 'Custom Remarks *',
+                    hint: 'Enter your custom notes here...',
+                    icon: Icons.edit_note_rounded,
+                    maxLines: 2,
+                    validator: (v) =>
+                        v == null || v.trim().isEmpty ? 'Required for Other' : null,
                   ),
                 ],
-              ),
-              const SizedBox(height: 16),
-              CheckboxListTile(
-                value: _whatsappDone,
-                onChanged: (val) =>
-                    setState(() => _whatsappDone = val ?? false),
-                activeColor: AppColors.primary,
-                title: Text(
-                  'WhatsApp Message Done ✓',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 14,
-                    fontWeight: FontWeight.w600,
-                    color: _whatsappDone
-                        ? AppColors.success
-                        : (isDark ? Colors.white70 : AppColors.textPrimary),
-                  ),
-                ),
-                subtitle: Text(
-                  'Confirm follow-up communication sent to customer',
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 11,
-                    color: AppColors.textTertiary,
-                  ),
-                ),
-                contentPadding: EdgeInsets.zero,
-                controlAffinity: ListTileControlAffinity.leading,
-              ),
-            ],
-          ).animate().fadeIn(delay: 240.ms).slideY(begin: 0.1),
+              ],
+            ).animate().fadeIn(delay: 200.ms).slideY(begin: 0.1),
 
-          const SizedBox(height: 14),
+            const SizedBox(height: 14),
 
-          _SectionCard(
-            color: cardColor,
-            title: 'Follow-Up Date *',
-            icon: Icons.calendar_today_rounded,
-            children: [
-              GestureDetector(
-                onTap: _pickDate,
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.06),
-                    borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
-                    border: Border.all(
-                      color: AppColors.primary.withValues(alpha: 0.3),
-                      width: 1.5,
+            _SectionCard(
+              color: cardColor,
+              title: 'Financials & Communication',
+              icon: Icons.payments_rounded,
+              children: [
+                // Order Value (Read-only / Auto-calculated from selected products)
+                TextFormField(
+                  controller: _orderCtrl,
+                  readOnly: true,
+                  style: GoogleFonts.plusJakartaSans(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w700,
+                    color: AppColors.accent,
+                  ),
+                  decoration: InputDecoration(
+                    labelText: 'Order Value',
+                    hintText: '0.00',
+                    hintStyle: GoogleFonts.plusJakartaSans(
+                      color: AppColors.textTertiary,
+                      fontSize: 18,
                     ),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.event_rounded,
-                          color: AppColors.primary, size: 20),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          DateFormat('EEEE, dd MMM yyyy').format(_followUpDate),
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                            color: AppColors.primary,
-                          ),
+                    prefixIcon: Container(
+                      padding: const EdgeInsets.only(left: 14, right: 8),
+                      child: Text(
+                        '₹',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.accent,
                         ),
                       ),
-                      const Icon(Icons.chevron_right_rounded,
-                          color: AppColors.primary, size: 20),
-                    ],
+                    ),
+                    prefixIconConstraints:
+                        const BoxConstraints(minWidth: 0, minHeight: 0),
+                    filled: true,
+                    fillColor: AppColors.accent.withValues(alpha: 0.05),
+                    enabledBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                      borderSide: BorderSide(
+                        color: AppColors.accent.withValues(alpha: 0.3),
+                        width: 1.5,
+                      ),
+                    ),
+                    focusedBorder: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                      borderSide: BorderSide(
+                        color: AppColors.accent.withValues(alpha: 0.3),
+                        width: 1.5,
+                      ),
+                    ),
+                  ),
+                  validator: (v) {
+                    if (_selectedStatus == 'Order Received') {
+                      if (v == null || v.trim().isEmpty) {
+                        return 'Required for Order Received';
+                      }
+                      final val = double.tryParse(v.replaceAll(',', ''));
+                      if (val == null || val <= 0) {
+                        return 'Must select products to generate order value';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(
+                      child: _Field(
+                        controller: _amountReceivedCtrl,
+                        label: 'Received (Optional)',
+                        hint: '0.00',
+                        icon: Icons.download_rounded,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                        ],
+                        validator: (v) {
+                          if (v != null && v.trim().isNotEmpty) {
+                            final orderVal = double.tryParse(_orderCtrl.text.replaceAll(',', '')) ?? 0.0;
+                            final amtRec = double.tryParse(v.replaceAll(',', '')) ?? 0.0;
+                            if (orderVal > 0 && amtRec > orderVal) {
+                              return 'Cannot exceed Order Value (₹${orderVal.toStringAsFixed(0)})';
+                            }
+                          }
+                          return null;
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: _Field(
+                        controller: _amountDueCtrl,
+                        label: 'Due',
+                        hint: '0.00',
+                        icon: Icons.upload_rounded,
+                        readOnly: true,
+                        keyboardType:
+                            const TextInputType.numberWithOptions(decimal: true),
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                CheckboxListTile(
+                  value: _whatsappDone,
+                  onChanged: (val) =>
+                      setState(() => _whatsappDone = val ?? false),
+                  activeColor: AppColors.primary,
+                  title: Text(
+                    'WhatsApp Message Done ✓',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: _whatsappDone
+                          ? AppColors.success
+                          : (isDark ? Colors.white70 : AppColors.textPrimary),
+                    ),
+                  ),
+                  subtitle: Text(
+                    'Confirm follow-up communication sent to customer',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 11,
+                      color: AppColors.textTertiary,
+                    ),
+                  ),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
+              ],
+            ).animate().fadeIn(delay: 240.ms).slideY(begin: 0.1),
+
+            const SizedBox(height: 14),
+
+            _SectionCard(
+              color: cardColor,
+              title: 'Follow-Up Date *',
+              icon: Icons.calendar_today_rounded,
+              children: [
+                GestureDetector(
+                  onTap: _pickDate,
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.06),
+                      borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                      border: Border.all(
+                        color: AppColors.primary.withValues(alpha: 0.3),
+                        width: 1.5,
+                      ),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.event_rounded,
+                            color: AppColors.primary, size: 20),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            DateFormat('EEEE, dd MMM yyyy').format(_followUpDate),
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ),
+                        const Icon(Icons.chevron_right_rounded,
+                            color: AppColors.primary, size: 20),
+                      ],
+                    ),
                   ),
                 ),
-              ),
-            ],
-          ).animate().fadeIn(delay: 280.ms).slideY(begin: 0.1),
+              ],
+            ).animate().fadeIn(delay: 280.ms).slideY(begin: 0.1),
 
-          const SizedBox(height: 24),
+            const SizedBox(height: 24),
 
-          PremiumButton(
-            label: 'Save Call Log',
-            isLoading: _isSubmitting,
-            onTap: _isSubmitting ? null : _submit,
-            icon: const Icon(Icons.save_rounded, color: Colors.white, size: 20),
-          ).animate().fadeIn(delay: 320.ms).slideY(begin: 0.2),
+            PremiumButton(
+              label: isField ? 'Submit Visit Log' : 'Save Call Log',
+              isLoading: _isSubmitting,
+              onTap: _isSubmitting ? null : _submit,
+              icon: const Icon(Icons.save_rounded, color: Colors.white, size: 20),
+            ).animate().fadeIn(delay: 320.ms).slideY(begin: 0.2),
           ],
         ],
       ),
