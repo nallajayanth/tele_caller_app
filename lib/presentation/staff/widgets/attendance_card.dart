@@ -231,6 +231,7 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
 
   @override
   Widget build(BuildContext context) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final attendanceAsync = ref.watch(activeAttendanceProvider);
     final activeUser = ref.watch(activeUserProvider);
     final isField = activeUser != null && activeUser.role == 'staff' && activeUser.isFieldStaff;
@@ -239,8 +240,13 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
       loading: () => Container(
         height: 120,
         decoration: BoxDecoration(
-          color: Colors.white.withValues(alpha: 0.05),
+          color: isDark ? Colors.white.withValues(alpha: 0.05) : Colors.white,
           borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+          border: Border.all(
+            color: isDark ? Colors.white.withValues(alpha: 0.12) : AppColors.border,
+            width: 1.5,
+          ),
+          boxShadow: isDark ? null : AppShadows.card,
         ),
         child: const Center(
           child: CircularProgressIndicator(color: AppColors.primaryLight),
@@ -249,9 +255,10 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
       error: (e, _) => Container(
         padding: const EdgeInsets.all(16),
         decoration: BoxDecoration(
-          color: Colors.orange.withValues(alpha: 0.12),
+          color: isDark ? Colors.orange.withValues(alpha: 0.12) : Colors.orange.withValues(alpha: 0.08),
           borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
           border: Border.all(color: Colors.orange.withValues(alpha: 0.4)),
+          boxShadow: isDark ? null : AppShadows.card,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -264,7 +271,7 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
                   'Location Permission Required',
                   style: GoogleFonts.plusJakartaSans(
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: isDark ? Colors.white : AppColors.textPrimary,
                   ),
                 ),
               ],
@@ -272,7 +279,10 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
             const SizedBox(height: 6),
             Text(
               'Location access is required for shift attendance & tracking.',
-              style: GoogleFonts.plusJakartaSans(fontSize: 12, color: Colors.white70),
+              style: GoogleFonts.plusJakartaSans(
+                fontSize: 12,
+                color: isDark ? Colors.white70 : AppColors.textSecondary,
+              ),
             ),
             const SizedBox(height: 12),
             SizedBox(
@@ -300,236 +310,265 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
       data: (attendance) {
         final isActive = attendance != null && attendance.isActive;
 
-        return ClipRRect(
-          borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
-            child: Container(
-              decoration: BoxDecoration(
-                color: isActive
+        return Container(
+          decoration: BoxDecoration(
+            color: isActive
+                ? (isDark
                     ? AppColors.primary.withValues(alpha: 0.15)
-                    : Colors.white.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
-                border: Border.all(
-                  color: isActive
+                    : AppColors.primary.withValues(alpha: 0.08))
+                : (isDark
+                    ? Colors.white.withValues(alpha: 0.06)
+                    : Colors.white),
+            borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+            border: Border.all(
+              color: isActive
+                  ? (isDark
                       ? AppColors.primaryLight.withValues(alpha: 0.4)
-                      : Colors.white.withValues(alpha: 0.12),
-                  width: 1.5,
-                ),
-              ),
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Row(
-                        children: [
-                          Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: isActive ? AppColors.success : Colors.grey,
+                      : AppColors.primary.withValues(alpha: 0.3))
+                  : (isDark
+                      ? Colors.white.withValues(alpha: 0.12)
+                      : AppColors.border),
+              width: 1.5,
+            ),
+            boxShadow: isDark ? null : AppShadows.card,
+          ),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(AppSpacing.cardRadius),
+            child: BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: 12, sigmaY: 12),
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              width: 12,
+                              height: 12,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: isActive ? AppColors.success : Colors.grey,
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            isActive ? 'SHIFT ACTIVE' : 'DUTY OFF',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 12,
-                              fontWeight: FontWeight.w700,
-                              letterSpacing: 1.2,
-                              color: isActive ? AppColors.success : Colors.white70,
+                            const SizedBox(width: 8),
+                            Text(
+                              isActive ? 'SHIFT ACTIVE' : 'DUTY OFF',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                                letterSpacing: 1.2,
+                                color: isActive
+                                    ? AppColors.success
+                                    : (isDark ? Colors.white70 : AppColors.textSecondary),
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                      if (attendance != null)
-                        Text(
-                          'Started at ${DateFormat('hh:mm a').format(attendance.startTime)}',
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 11,
-                            color: Colors.white60,
-                          ),
+                          ],
                         ),
-                    ],
-                  ),
-                  const SizedBox(height: 14),
-                  if (isActive) ...[
-                    if (isField) ...[
-                      Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          if (attendance.startSelfieUrl != null)
-                            GestureDetector(
-                              onTap: () => _showImageDialog(context, attendance.startSelfieUrl!),
-                              child: Hero(
-                                tag: 'attendance_selfie',
-                                child: Container(
-                                  width: 70,
-                                  height: 70,
-                                  decoration: BoxDecoration(
-                                    borderRadius: BorderRadius.circular(12),
-                                    border: Border.all(color: Colors.white24, width: 1.5),
-                                    image: DecorationImage(
-                                      image: NetworkImage(attendance.startSelfieUrl!),
-                                      fit: BoxFit.cover,
+                        if (attendance != null)
+                          Text(
+                            'Started at ${DateFormat('hh:mm a').format(attendance.startTime)}',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 11,
+                              color: isDark ? Colors.white60 : AppColors.textTertiary,
+                            ),
+                          ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    if (isActive) ...[
+                      if (isField) ...[
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            if (attendance.startSelfieUrl != null)
+                              GestureDetector(
+                                onTap: () => _showImageDialog(context, attendance.startSelfieUrl!),
+                                child: Hero(
+                                  tag: 'attendance_selfie',
+                                  child: Container(
+                                    width: 70,
+                                    height: 70,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(
+                                        color: isDark ? Colors.white24 : AppColors.border,
+                                        width: 1.5,
+                                      ),
+                                      image: DecorationImage(
+                                        image: NetworkImage(attendance.startSelfieUrl!),
+                                        fit: BoxFit.cover,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
-                            ),
-                          if (attendance.startSelfieUrl != null) const SizedBox(width: 14),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Row(
-                                  children: [
-                                    const Icon(Icons.my_location_rounded, color: AppColors.accent, size: 14),
-                                    const SizedBox(width: 6),
-                                    Expanded(
-                                      child: Text(
-                                        'GPS: ${attendance.startLatitude.toStringAsFixed(4)}, ${attendance.startLongitude.toStringAsFixed(4)}',
-                                        style: GoogleFonts.plusJakartaSans(
-                                          fontSize: 12,
-                                          color: Colors.white.withValues(alpha: 0.9),
-                                          fontWeight: FontWeight.w500,
+                            if (attendance.startSelfieUrl != null) const SizedBox(width: 14),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Row(
+                                    children: [
+                                      const Icon(Icons.my_location_rounded, color: AppColors.accent, size: 14),
+                                      const SizedBox(width: 6),
+                                      Expanded(
+                                        child: Text(
+                                          'GPS: ${attendance.startLatitude.toStringAsFixed(4)}, ${attendance.startLongitude.toStringAsFixed(4)}',
+                                          style: GoogleFonts.plusJakartaSans(
+                                            fontSize: 12,
+                                            color: isDark ? Colors.white.withValues(alpha: 0.9) : AppColors.textPrimary,
+                                            fontWeight: FontWeight.w500,
+                                          ),
                                         ),
                                       ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                Row(
-                                  children: [
-                                    const Icon(Icons.battery_charging_full_rounded, color: AppColors.success, size: 14),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'Battery: ${attendance.startBattery}%',
-                                      style: GoogleFonts.plusJakartaSans(
-                                        fontSize: 12,
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 12),
-                                    const Icon(Icons.wifi_rounded, color: AppColors.primaryLight, size: 14),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      'Network: ${attendance.startNetwork}',
-                                      style: GoogleFonts.plusJakartaSans(
-                                        fontSize: 12,
-                                        color: Colors.white70,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 6),
-                                Text(
-                                  'Device: ${attendance.deviceId}',
-                                  style: GoogleFonts.plusJakartaSans(
-                                    fontSize: 10,
-                                    color: Colors.white30,
+                                    ],
                                   ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ],
+                                  const SizedBox(height: 6),
+                                  Wrap(
+                                    spacing: 10,
+                                    runSpacing: 4,
+                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                    children: [
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.battery_charging_full_rounded, color: AppColors.success, size: 14),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Battery: ${attendance.startBattery}%',
+                                            style: GoogleFonts.plusJakartaSans(
+                                              fontSize: 12,
+                                              color: isDark ? Colors.white70 : AppColors.textSecondary,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                      Row(
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
+                                          const Icon(Icons.wifi_rounded, color: AppColors.primaryLight, size: 14),
+                                          const SizedBox(width: 4),
+                                          Text(
+                                            'Network: ${attendance.startNetwork}',
+                                            style: GoogleFonts.plusJakartaSans(
+                                              fontSize: 12,
+                                              color: isDark ? Colors.white70 : AppColors.textSecondary,
+                                            ),
+                                            overflow: TextOverflow.ellipsis,
+                                          ),
+                                        ],
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 6),
+                                  Text(
+                                    'Device: ${attendance.deviceId}',
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 10,
+                                      color: isDark ? Colors.white30 : AppColors.textTertiary,
+                                    ),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ] else ...[
+                        Row(
+                          children: [
+                            const Icon(Icons.location_off_rounded, color: AppColors.textTertiary, size: 16),
+                            const SizedBox(width: 8),
+                            Text(
+                              'GPS: Not Required',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: isDark ? Colors.white70 : AppColors.textSecondary,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton.icon(
+                          onPressed: _isProcessing ? null : _confirmEndDuty,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.error,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
                             ),
                           ),
-                        ],
+                          icon: _isProcessing
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                )
+                              : const Icon(Icons.stop_circle_outlined, size: 20),
+                          label: Text(
+                            _isProcessing ? _loadingMessage : 'END DUTY SHIFT',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
                       ),
                     ] else ...[
-                      Row(
-                        children: [
-                          const Icon(Icons.location_off_rounded, color: AppColors.textTertiary, size: 16),
-                          const SizedBox(width: 8),
-                          Text(
-                            'GPS: Not Required',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w600,
-                              color: Colors.white70,
+                      Text(
+                        isField
+                            ? 'Start your day to initiate live GPS tracking and enable visit logging.'
+                            : 'Start your shift to begin recording your duty hours for today.',
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 12,
+                          color: isDark ? Colors.white.withValues(alpha: 0.6) : AppColors.textSecondary,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton.icon(
+                          onPressed: _isProcessing ? null : _handleStartDuty,
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppColors.primaryLight,
+                            foregroundColor: Colors.white,
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
                             ),
                           ),
-                        ],
+                          icon: _isProcessing
+                              ? const SizedBox(
+                                  width: 20,
+                                  height: 20,
+                                  child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
+                                )
+                              : const Icon(Icons.play_arrow_rounded, size: 22),
+                          label: Text(
+                            _isProcessing ? _loadingMessage : 'START DUTY SHIFT',
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.5,
+                            ),
+                          ),
+                        ),
                       ),
                     ],
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton.icon(
-                        onPressed: _isProcessing ? null : _confirmEndDuty,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.error,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
-                          ),
-                        ),
-                        icon: _isProcessing
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                              )
-                            : const Icon(Icons.stop_circle_outlined, size: 20),
-                        label: Text(
-                          _isProcessing ? _loadingMessage : 'END DUTY SHIFT',
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ),
-                    ),
-                  ] else ...[
-                    Text(
-                      isField
-                          ? 'Start your day to initiate live GPS tracking and enable visit logging.'
-                          : 'Start your shift to begin recording your duty hours for today.',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 12,
-                        color: Colors.white.withValues(alpha: 0.6),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 52,
-                      child: ElevatedButton.icon(
-                        onPressed: _isProcessing ? null : _handleStartDuty,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppColors.primaryLight,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(AppSpacing.buttonRadius),
-                          ),
-                        ),
-                        icon: _isProcessing
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                              )
-                            : const Icon(Icons.play_arrow_rounded, size: 22),
-                        label: Text(
-                          _isProcessing ? _loadingMessage : 'START DUTY SHIFT',
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w700,
-                            letterSpacing: 0.5,
-                          ),
-                        ),
-                      ),
-                    ),
                   ],
-                ],
+                ),
               ),
             ),
           ),

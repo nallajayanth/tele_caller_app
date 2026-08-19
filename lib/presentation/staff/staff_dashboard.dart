@@ -226,6 +226,8 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
     final activeUser = ref.watch(activeUserProvider);
     final userName = activeUser?.name;
 
+    final isField = activeUser != null && activeUser.role == 'staff' && activeUser.isFieldStaff;
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -233,7 +235,7 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
           children: [
             Text(
               _currentIndex == 0
-                  ? 'New Call Log'
+                  ? (isField ? 'New Visit Log' : 'New Call Log')
                   : _currentIndex == 1
                       ? 'My Activity'
                       : _currentIndex == 2
