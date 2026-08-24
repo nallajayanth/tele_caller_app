@@ -200,6 +200,22 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
           .doc(current.id)
           .update(updated.toJson());
 
+      // Set staff as offline in staff_locations collection on duty end
+      final phone = _userPhone ?? current.staffPhone;
+      if (phone.isNotEmpty) {
+        try {
+          await FirebaseFirestore.instance
+              .collection('staff_locations')
+              .doc(phone)
+              .set({
+            'isOnline': false,
+            'timestamp': FieldValue.serverTimestamp(),
+          }, SetOptions(merge: true));
+        } catch (e) {
+          debugPrint('Failed to update staff_locations on endDuty: $e');
+        }
+      }
+
       state = AsyncValue.data(updated);
       return true;
     } catch (e, st) {
@@ -209,3 +225,23 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
     }
   }
 }
+
+// Selected date for admin attendance monitoring screen
+final adminAttendanceDateProvider = StateProvider<DateTime>((ref) => DateTime.now());
+
+// Stream provider to watch all staff attendance logs for the selected date
+final dailyAttendanceProvider = StreamProvider<List<AttendanceModel>>((ref) {
+  final selectedDate = ref.watch(adminAttendanceDateProvider);
+  final dateStr = DateFormat('yyyy-MM-dd').format(selectedDate);
+
+  return FirebaseFirestore.instance
+      .collection('attendance_logs')
+      .where('date', isEqualTo: dateStr)
+      .snapshots()
+      .map((snapshot) {
+    return snapshot.docs
+        .map((doc) => AttendanceModel.fromJson(doc.data()))
+        .toList();
+  });
+});
+

@@ -172,7 +172,7 @@ class LocationService {
           await FirebaseFirestore.instance
               .collection('staff_locations')
               .doc(phoneNumber!)
-              .update({'isOnline': false});
+              .set({'isOnline': false}, SetOptions(merge: true));
         } catch (_) {}
       }
       service.stopSelf();

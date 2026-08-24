@@ -59,12 +59,17 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
               updatedTime = timestampVal.toDate();
             }
 
+            final rawIsOnline = data['isOnline'] as bool? ?? false;
+            final isFresh = updatedTime != null &&
+                DateTime.now().difference(updatedTime).inMinutes < 5;
+            final isOnline = rawIsOnline && isFresh;
+
             return _StaffLocationData(
               phoneNumber: doc.id,
               name: data['name'] as String? ?? 'Unknown Staff',
               latitude: (data['latitude'] as num?)?.toDouble() ?? 0.0,
               longitude: (data['longitude'] as num?)?.toDouble() ?? 0.0,
-              isOnline: data['isOnline'] as bool? ?? false,
+              isOnline: isOnline,
               lastUpdated: updatedTime,
             );
           }).where((staff) => fieldStaffPhones.contains(staff.phoneNumber)).toList();

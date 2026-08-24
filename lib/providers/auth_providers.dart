@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:hive_flutter/hive_flutter.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -81,13 +82,31 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
   }
 
   Future<void> signOut() async {
+    final user = state;
+    final phone = user?.phoneNumber;
+
+    // Explicitly set isOnline: false in Firestore staff_locations BEFORE clearing state
+    if (phone != null && phone.isNotEmpty) {
+      try {
+        await FirebaseFirestore.instance
+            .collection('staff_locations')
+            .doc(phone)
+            .set({
+          'isOnline': false,
+          'timestamp': FieldValue.serverTimestamp(),
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('Failed to set staff offline on signOut: $e');
+      }
+    }
+
     final box = Hive.box('settings');
     final secureBox = Hive.box('secure_settings');
     await secureBox.delete(_sessionKey);
-    
+
     // Re-generate a generic unique device ID upon logout for security
     await box.put('device_id', const Uuid().v4());
-    
+
     // Explicitly stop background location service if running on logout
     try {
       final service = FlutterBackgroundService();
@@ -95,7 +114,7 @@ class AuthNotifier extends StateNotifier<TelecallerModel?> {
         service.invoke('stopService');
       }
     } catch (_) {}
-    
+
     state = null;
   }
 }

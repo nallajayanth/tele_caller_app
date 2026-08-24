@@ -19,7 +19,8 @@ class EmployeeMonitoringScreen extends ConsumerWidget {
     final targetsAsync = ref.watch(adminTargetProvider);
     final logsAsync = ref.watch(callLogsProvider);
 
-    final now = DateTime.now();
+    final selectedDate = ref.watch(targetDateProvider);
+    final currentMonthName = DateFormat('MMMM yyyy').format(selectedDate);
 
     return Scaffold(
       appBar: AppBar(
@@ -60,33 +61,96 @@ class EmployeeMonitoringScreen extends ConsumerWidget {
                     return ListView.builder(
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: const EdgeInsets.all(16),
-                      itemCount: staffMembers.length,
-                    itemBuilder: (context, i) {
-                      final staff = staffMembers[i];
-                      final deviceId = '00000000-0000-0000-0000-${staff.phoneNumber.padLeft(12, '0')}';
-                      
-                      final target = targetsMap[deviceId] ?? 0.0;
+                      itemCount: staffMembers.length + 1,
+                      itemBuilder: (context, index) {
+                        if (index == 0) {
+                          return Container(
+                            margin: const EdgeInsets.only(bottom: 16),
+                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                            decoration: BoxDecoration(
+                              color: cardColor,
+                              borderRadius: BorderRadius.circular(14),
+                              border: Border.all(color: isDark ? AppColors.borderDark : AppColors.border),
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                IconButton(
+                                  icon: const Icon(Icons.chevron_left_rounded),
+                                  onPressed: () {
+                                    ref.read(targetDateProvider.notifier).state =
+                                        DateTime(selectedDate.year, selectedDate.month - 1);
+                                  },
+                                ),
+                                Row(
+                                  children: [
+                                    const Icon(Icons.calendar_month_rounded, size: 18, color: AppColors.primary),
+                                    const SizedBox(width: 8),
+                                    Text(
+                                      currentMonthName,
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.w700,
+                                        color: isDark ? Colors.white : AppColors.textPrimary,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                IconButton(
+                                  icon: const Icon(Icons.chevron_right_rounded),
+                                  onPressed: () {
+                                    ref.read(targetDateProvider.notifier).state =
+                                        DateTime(selectedDate.year, selectedDate.month + 1);
+                                  },
+                                ),
+                              ],
+                            ),
+                          );
+                        }
 
-                      // Filter logs for this employee for the current month
-                      final employeeLogs = logs.where((l) =>
-                          l.deviceId == deviceId &&
-                          l.date.year == now.year &&
-                          l.date.month == now.month).toList();
+                        final staff = staffMembers[index - 1];
+                        final phone = staff.phoneNumber;
+                        final deviceId = '00000000-0000-0000-0000-${phone.padLeft(12, '0')}';
+                        
+                        double target = 0.0;
+                        if (targetsMap.containsKey(deviceId)) {
+                          target = targetsMap[deviceId]!;
+                        } else if (targetsMap.containsKey(phone)) {
+                          target = targetsMap[phone]!;
+                        } else {
+                          for (final entry in targetsMap.entries) {
+                            if (entry.key.contains(phone) || phone.contains(entry.key)) {
+                              target = entry.value;
+                              break;
+                            }
+                          }
+                        }
 
-                      // Aggregates
-                      final achieved = employeeLogs
-                          .where((l) => l.connectedStatus == 'Order Received')
-                          .fold<double>(0.0, (sum, l) => sum + l.orderValue);
+                        // Filter logs for this employee for the selected target month
+                        final employeeLogs = logs.where((l) {
+                          final matchesStaff = l.deviceId == deviceId ||
+                              l.deviceId == phone ||
+                              l.deviceId.contains(phone) ||
+                              (phone.length >= 10 && l.deviceId.endsWith(phone));
+                          return matchesStaff &&
+                              l.date.year == selectedDate.year &&
+                              l.date.month == selectedDate.month;
+                        }).toList();
 
-                      final collected = employeeLogs
-                          .where((l) => l.connectedStatus == 'Order Received')
-                          .fold<double>(0.0, (sum, l) => sum + l.amountReceived);
+                        // Aggregates
+                        final achieved = employeeLogs
+                            .where((l) => l.connectedStatus == 'Order Received')
+                            .fold<double>(0.0, (sum, l) => sum + l.orderValue);
 
-                      final due = employeeLogs
-                          .where((l) => l.connectedStatus == 'Order Received')
-                          .fold<double>(0.0, (sum, l) => sum + l.amountDue);
+                        final collected = employeeLogs
+                            .where((l) => l.connectedStatus == 'Order Received')
+                            .fold<double>(0.0, (sum, l) => sum + l.amountReceived);
 
-                      final double progressPercent = target > 0 ? (achieved / target).clamp(0.0, 1.0) : 0.0;
+                        final due = employeeLogs
+                            .where((l) => l.connectedStatus == 'Order Received')
+                            .fold<double>(0.0, (sum, l) => sum + l.amountDue);
+
+                        final double progressPercent = target > 0 ? (achieved / target).clamp(0.0, 1.0) : 0.0;
 
                       return Card(
                         margin: const EdgeInsets.only(bottom: 16),

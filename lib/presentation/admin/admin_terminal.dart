@@ -26,6 +26,7 @@ import 'screens/employee_monitoring_screen.dart';
 import 'screens/user_management_screen.dart';
 import 'screens/product_management_screen.dart';
 import 'screens/live_tracking_screen.dart';
+import 'screens/daily_attendance_screen.dart';
 import 'views/admin_edit_modal.dart';
 import 'widgets/admin_log_card.dart';
 import 'widgets/metric_tile.dart';
@@ -242,6 +243,21 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
         ),
         actions: [
           IconButton(
+            tooltip: 'Daily Attendance',
+            icon: Container(
+              padding: const EdgeInsets.all(6),
+              decoration: BoxDecoration(
+                color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Icon(Icons.how_to_reg_rounded,
+                  color: Color(0xFF10B981), size: 18),
+            ),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const DailyAttendanceScreen()),
+            ),
+          ),
+          IconButton(
             tooltip: 'Sign Out',
             icon: Container(
               padding: const EdgeInsets.all(6),
@@ -260,7 +276,11 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
               borderRadius: BorderRadius.circular(12),
             ),
             onSelected: (value) {
-              if (value == 'export') {
+              if (value == 'attendance') {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DailyAttendanceScreen()),
+                );
+              } else if (value == 'export') {
                 _exportCSV();
               } else if (value == 'deleted') {
                 Navigator.of(context).push(
@@ -271,6 +291,27 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
               }
             },
             itemBuilder: (BuildContext context) => <PopupMenuEntry<String>>[
+              PopupMenuItem<String>(
+                value: 'attendance',
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.how_to_reg_rounded,
+                      size: 18,
+                      color: isDark ? Colors.white70 : AppColors.textPrimary,
+                    ),
+                    const SizedBox(width: 10),
+                    Text(
+                      'Daily Attendance',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: isDark ? Colors.white : AppColors.textPrimary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               PopupMenuItem<String>(
                 value: 'export',
                 child: Row(
@@ -370,7 +411,76 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
                   ),
                 ),
 
-                const SizedBox.shrink(),
+                // Quick Action Bar for Daily Attendance
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  child: InkWell(
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const DailyAttendanceScreen()),
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF10B981), Color(0xFF059669)],
+                        ),
+                        borderRadius: BorderRadius.circular(16),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.3),
+                            blurRadius: 8,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(8),
+                            decoration: BoxDecoration(
+                              color: Colors.white.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(10),
+                            ),
+                            child: const Icon(
+                              Icons.how_to_reg_rounded,
+                              color: Colors.white,
+                              size: 22,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Daily Staff Attendance',
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                Text(
+                                  'View duty shifts, selfies & working hours',
+                                  style: GoogleFonts.plusJakartaSans(
+                                    fontSize: 11,
+                                    color: Colors.white.withValues(alpha: 0.85),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          const Icon(
+                            Icons.arrow_forward_ios_rounded,
+                            color: Colors.white,
+                            size: 16,
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
 
                 // Today's Order Pipeline Stats Dashboard
                 _buildDailyOrderStats(context, isDark, dailyStats, filter),
@@ -1399,6 +1509,18 @@ class _AdminSettingsTab extends StatelessWidget {
             isDark: isDark,
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const EmployeeMonitoringScreen()),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildSettingsTile(
+            context: context,
+            title: 'Daily Attendance',
+            subtitle: 'Track staff duty shifts, selfies & hours',
+            icon: Icons.how_to_reg_rounded,
+            color: const Color(0xFF10B981),
+            isDark: isDark,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const DailyAttendanceScreen()),
             ),
           ),
           const SizedBox(height: 12),

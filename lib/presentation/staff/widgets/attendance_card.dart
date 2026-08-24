@@ -369,11 +369,14 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
                           ],
                         ),
                         if (attendance != null)
-                          Text(
-                            'Started at ${DateFormat('hh:mm a').format(attendance.startTime)}',
-                            style: GoogleFonts.plusJakartaSans(
-                              fontSize: 11,
-                              color: isDark ? Colors.white60 : AppColors.textTertiary,
+                          Flexible(
+                            child: Text(
+                              'Started at ${DateFormat('hh:mm a').format(attendance.startTime)}',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 11,
+                                color: isDark ? Colors.white60 : AppColors.textTertiary,
+                              ),
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
                       ],
@@ -423,44 +426,35 @@ class _AttendanceCardState extends ConsumerState<AttendanceCard> {
                                             color: isDark ? Colors.white.withValues(alpha: 0.9) : AppColors.textPrimary,
                                             fontWeight: FontWeight.w500,
                                           ),
+                                          overflow: TextOverflow.ellipsis,
                                         ),
                                       ),
                                     ],
                                   ),
                                   const SizedBox(height: 6),
-                                  Wrap(
-                                    spacing: 10,
-                                    runSpacing: 4,
-                                    crossAxisAlignment: WrapCrossAlignment.center,
+                                  Row(
                                     children: [
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.battery_charging_full_rounded, color: AppColors.success, size: 14),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            'Battery: ${attendance.startBattery}%',
-                                            style: GoogleFonts.plusJakartaSans(
-                                              fontSize: 12,
-                                              color: isDark ? Colors.white70 : AppColors.textSecondary,
-                                            ),
-                                          ),
-                                        ],
+                                      const Icon(Icons.battery_charging_full_rounded, color: AppColors.success, size: 14),
+                                      const SizedBox(width: 4),
+                                      Text(
+                                        '${attendance.startBattery}%',
+                                        style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 12,
+                                          color: isDark ? Colors.white70 : AppColors.textSecondary,
+                                        ),
                                       ),
-                                      Row(
-                                        mainAxisSize: MainAxisSize.min,
-                                        children: [
-                                          const Icon(Icons.wifi_rounded, color: AppColors.primaryLight, size: 14),
-                                          const SizedBox(width: 4),
-                                          Text(
-                                            'Network: ${attendance.startNetwork}',
-                                            style: GoogleFonts.plusJakartaSans(
-                                              fontSize: 12,
-                                              color: isDark ? Colors.white70 : AppColors.textSecondary,
-                                            ),
-                                            overflow: TextOverflow.ellipsis,
+                                      const SizedBox(width: 12),
+                                      const Icon(Icons.wifi_rounded, color: AppColors.primaryLight, size: 14),
+                                      const SizedBox(width: 4),
+                                      Expanded(
+                                        child: Text(
+                                          attendance.startNetwork,
+                                          style: GoogleFonts.plusJakartaSans(
+                                            fontSize: 12,
+                                            color: isDark ? Colors.white70 : AppColors.textSecondary,
                                           ),
-                                        ],
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
                                       ),
                                     ],
                                   ),
