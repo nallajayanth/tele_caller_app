@@ -7,6 +7,7 @@
     <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <application
         android:label="HT TELECALING"
@@ -52,6 +53,13 @@
             android:foregroundServiceType="location"
             android:exported="false"
             tools:replace="android:exported,android:foregroundServiceType" />
+
+        <!-- Disable the plugin's boot receiver; the app starts the service manually when the shift begins. -->
+        <receiver
+            android:name="id.flutter.flutter_background_service.BootReceiver"
+            android:enabled="false"
+            android:exported="true"
+            tools:replace="android:enabled,android:exported" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and
