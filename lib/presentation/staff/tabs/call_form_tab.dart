@@ -537,7 +537,7 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
       return;
     }
 
-    final bool statusMissing = _selectedStatus == null;
+    final bool statusMissing = !isField && _selectedStatus == null;
     if (statusMissing) {
       setState(() => _statusError = true);
     } else {
@@ -593,6 +593,10 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
                 .toList(),
           );
 
+    final String effectiveStatus = isField
+        ? (_selectedStatus ?? (_selectedProducts.isNotEmpty ? 'Order Received' : 'Connected'))
+        : _selectedStatus!;
+
     final log = CallLogModel(
       id: _uuid.v4(),
       date: DateTime.now(),
@@ -601,7 +605,7 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
       mobile: _mobileCtrl.text.trim(),
       place: _placeCtrl.text.trim(),
       product: productStr,
-      connectedStatus: _selectedStatus!,
+      connectedStatus: effectiveStatus,
       customerResponse: _responseCtrl.text.trim(),
       nextFollowUpDate: _followUpDate,
       orderValue: double.tryParse(_orderCtrl.text.replaceAll(',', '')) ?? 0.0,
@@ -611,8 +615,8 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
       amountDue: double.tryParse(_amountDueCtrl.text.replaceAll(',', '')) ?? 0.0,
       whatsappDone: _whatsappDone,
       standardRemark: _selectedStandardRemark,
-      orderStatus: _selectedStatus == 'Order Received' ? 'received' : null,
-      orderStatusUpdatedAt: _selectedStatus == 'Order Received' ? DateTime.now() : null,
+      orderStatus: effectiveStatus == 'Order Received' ? 'received' : null,
+      orderStatusUpdatedAt: effectiveStatus == 'Order Received' ? DateTime.now() : null,
     );
 
     final success = await ref.read(callLogsProvider.notifier).addLog(log);
@@ -1025,70 +1029,71 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
               const SizedBox(height: 14),
             ],
 
-            _SectionCard(
-              key: _statusKey,
-              color: cardColor,
-              title: 'Call Status *',
-              icon: Icons.signal_cellular_alt_rounded,
-              children: [
-                DropdownButtonFormField<String>(
-                  initialValue: _selectedStatus,
-                  isExpanded: true,
-                  decoration: const InputDecoration(
-                    labelText: 'Select Call Status *',
-                    prefixIcon: Icon(Icons.signal_cellular_alt_rounded,
-                        color: AppColors.textTertiary, size: 20),
-                  ),
-                  dropdownColor: cardColor,
-                  style: GoogleFonts.plusJakartaSans(
-                    color: isDark ? Colors.white : AppColors.textPrimary,
-                    fontSize: 14,
-                    fontWeight: FontWeight.w500,
-                  ),
-                  items: kStatusOptions.map((opt) {
-                    return DropdownMenuItem<String>(
-                      value: opt.label,
-                      child: Row(
-                        children: [
-                          Icon(opt.icon, size: 18, color: opt.color),
-                          const SizedBox(width: 10),
-                          Text(
-                            opt.label,
-                            style: GoogleFonts.plusJakartaSans(
-                              color: isDark ? Colors.white : AppColors.textPrimary,
-                              fontWeight: FontWeight.w600,
+            if (!isField) ...[
+              _SectionCard(
+                key: _statusKey,
+                color: cardColor,
+                title: 'Call Status *',
+                icon: Icons.signal_cellular_alt_rounded,
+                children: [
+                  DropdownButtonFormField<String>(
+                    initialValue: _selectedStatus,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'Select Call Status *',
+                      prefixIcon: Icon(Icons.signal_cellular_alt_rounded,
+                          color: AppColors.textTertiary, size: 20),
+                    ),
+                    dropdownColor: cardColor,
+                    style: GoogleFonts.plusJakartaSans(
+                      color: isDark ? Colors.white : AppColors.textPrimary,
+                      fontSize: 14,
+                      fontWeight: FontWeight.w500,
+                    ),
+                    items: kStatusOptions.map((opt) {
+                      return DropdownMenuItem<String>(
+                        value: opt.label,
+                        child: Row(
+                          children: [
+                            Icon(opt.icon, size: 18, color: opt.color),
+                            const SizedBox(width: 10),
+                            Text(
+                              opt.label,
+                              style: GoogleFonts.plusJakartaSans(
+                                color: isDark ? Colors.white : AppColors.textPrimary,
+                                fontWeight: FontWeight.w600,
+                              ),
                             ),
-                          ),
-                        ],
-                      ),
-                    );
-                  }).toList(),
-                  onChanged: (s) {
-                    if (s != null) {
-                      setState(() {
-                        _selectedStatus = s;
-                        _statusError = false;
-                        _updateAmountDue();
-                      });
-                    }
-                  },
-                ),
-                if (_statusError)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Text(
-                      'Please select a call status',
-                      style: TextStyle(
-                        color: AppColors.error,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w500,
+                          ],
+                        ),
+                      );
+                    }).toList(),
+                    onChanged: (s) {
+                      if (s != null) {
+                        setState(() {
+                          _selectedStatus = s;
+                          _statusError = false;
+                          _updateAmountDue();
+                        });
+                      }
+                    },
+                  ),
+                  if (_statusError)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: Text(
+                        'Please select a call status',
+                        style: TextStyle(
+                          color: AppColors.error,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
                       ),
                     ),
-                  ),
-              ],
-            ).animate().fadeIn(delay: 120.ms).slideY(begin: 0.1),
-
-            const SizedBox(height: 14),
+                ],
+              ).animate().fadeIn(delay: 120.ms).slideY(begin: 0.1),
+              const SizedBox(height: 14),
+            ],
 
             _SectionCard(
               key: _productKey,

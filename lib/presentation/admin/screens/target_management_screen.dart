@@ -16,20 +16,46 @@ final targetDateProvider = StateProvider<DateTime>((ref) => DateTime.now());
 final adminTargetProvider = FutureProvider<Map<String, double>>((ref) async {
   try {
     final selectedDate = ref.watch(targetDateProvider);
-    final snapshot = await FirebaseFirestore.instance
+    final now = DateTime.now();
+
+    var snapshot = await FirebaseFirestore.instance
         .collection('monthly_targets')
         .where('month', isEqualTo: selectedDate.month)
         .where('year', isEqualTo: selectedDate.year)
         .get();
     
+    // If empty for selected month and selected date is not current month, try current month
+    if (snapshot.docs.isEmpty && (selectedDate.month != now.month || selectedDate.year != now.year)) {
+      snapshot = await FirebaseFirestore.instance
+          .collection('monthly_targets')
+          .where('month', isEqualTo: now.month)
+          .where('year', isEqualTo: now.year)
+          .get();
+    }
+
+    // Ultimate fallback: fetch all monthly targets if date query returns empty
+    if (snapshot.docs.isEmpty) {
+      snapshot = await FirebaseFirestore.instance
+          .collection('monthly_targets')
+          .get();
+    }
+
     final Map<String, double> targetMap = {};
     for (final doc in snapshot.docs) {
       final data = doc.data();
       final deviceId = data['staff_device_id'] as String?;
-      if (deviceId == null || deviceId.isEmpty) continue;
+      final phone = data['staff_phone'] as String?;
       final targetAmount = data['target_amount'];
       final targetVal = targetAmount is num ? targetAmount.toDouble() : 0.0;
-      targetMap[deviceId] = targetVal;
+
+      if (deviceId != null && deviceId.isNotEmpty) {
+        targetMap[deviceId] = targetVal;
+      }
+      if (phone != null && phone.isNotEmpty) {
+        targetMap[phone] = targetVal;
+        final aliasDeviceId = '00000000-0000-0000-0000-${phone.padLeft(12, '0')}';
+        targetMap[aliasDeviceId] = targetVal;
+      }
     }
     return targetMap;
   } catch (e) {

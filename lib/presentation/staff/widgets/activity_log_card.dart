@@ -11,6 +11,8 @@ import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
 import '../../../data/models/call_log_model.dart';
 import '../../../data/models/order_model.dart';
+import '../../../data/models/telecaller_model.dart';
+import '../../../providers/auth_providers.dart';
 import '../../../providers/call_log_providers.dart';
 import '../../../providers/order_providers.dart';
 import '../../../providers/product_providers.dart';
@@ -19,8 +21,18 @@ import '../../common/widgets/multi_image_viewer.dart';
 class ActivityLogCard extends ConsumerStatefulWidget {
   final CallLogModel log;
   final int index;
+  final bool showStaffName;
+  final VoidCallback? onEdit;
+  final VoidCallback? onDelete;
 
-  const ActivityLogCard({super.key, required this.log, required this.index});
+  const ActivityLogCard({
+    super.key,
+    required this.log,
+    required this.index,
+    this.showStaffName = false,
+    this.onEdit,
+    this.onDelete,
+  });
 
   @override
   ConsumerState<ActivityLogCard> createState() => _ActivityLogCardState();
@@ -36,6 +48,10 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
     final log = widget.log;
     final statusColor = AppColors.statusColor(log.connectedStatus);
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
+
+    final telecallersAsync = ref.watch(telecallersProvider);
+    final telecallers = telecallersAsync.value ?? [];
+    final staffName = _getStaffName(log.deviceId, telecallers);
 
     // Check order detail if status is order received
     final OrderModel? orderDetail = log.product.isNotEmpty
@@ -169,6 +185,11 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
                           label: '📅 ${DateFormat('dd MMM').format(log.nextFollowUpDate)}',
                           color: AppColors.info,
                         ),
+                        if (widget.showStaffName)
+                          _Pill(
+                            label: '👤 Staff: $staffName',
+                            color: AppColors.primary,
+                          ),
                         if (log.product.isNotEmpty)
                           _Pill(
                             label: '📦 ${(orderDetail?.status ?? 'received').toUpperCase()}',
@@ -233,6 +254,14 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
                             color: isDark ? AppColors.borderDark : AppColors.border,
                             height: 16,
                           ),
+                          if (widget.showStaffName && staffName.isNotEmpty) ...[
+                            _DetailRow(
+                              icon: Icons.person_rounded,
+                              label: 'Staff Name',
+                              value: staffName,
+                            ),
+                            const SizedBox(height: 10),
+                          ],
                           if (log.clinicName != null && log.clinicName!.isNotEmpty) ...[
                             _DetailRow(
                               icon: Icons.local_hospital_rounded,
@@ -518,6 +547,35 @@ class _ActivityLogCardState extends ConsumerState<ActivityLogCard> {
                             label: 'Logged At',
                             value: DateFormat('dd MMM yyyy, hh:mm a').format(log.date),
                           ),
+                          if (widget.onEdit != null || widget.onDelete != null) ...[
+                            const SizedBox(height: 12),
+                            Divider(
+                              color: isDark ? AppColors.borderDark : AppColors.border,
+                              height: 1,
+                            ),
+                            const SizedBox(height: 10),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.end,
+                              children: [
+                                if (widget.onEdit != null)
+                                  _ActionButton(
+                                    icon: Icons.edit_rounded,
+                                    label: 'Edit',
+                                    color: AppColors.primary,
+                                    onTap: widget.onEdit!,
+                                  ),
+                                if (widget.onDelete != null) ...[
+                                  if (widget.onEdit != null) const SizedBox(width: 8),
+                                  _ActionButton(
+                                    icon: Icons.delete_outline_rounded,
+                                    label: 'Delete',
+                                    color: AppColors.error,
+                                    onTap: widget.onDelete!,
+                                  ),
+                                ],
+                              ],
+                            ),
+                          ],
                         ],
                       ),
                     )
@@ -1753,4 +1811,68 @@ class _ProductItemLog {
   final String name;
   final int qty;
   _ProductItemLog({required this.name, required this.qty});
+}
+
+class _ActionButton extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _ActionButton({
+    required this.icon,
+    required this.label,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: Colors.transparent,
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(8),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: color.withValues(alpha: 0.3)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 4),
+              Text(
+                label,
+                style: GoogleFonts.plusJakartaSans(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                  color: color,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+String _getStaffName(String deviceId, List<TelecallerModel> telecallers) {
+  if (deviceId.isEmpty) return 'Staff';
+  String phone = deviceId;
+  if (deviceId.startsWith('00000000-0000-0000-0000-')) {
+    phone = deviceId.substring(24).replaceFirst(RegExp(r'^0+'), '');
+  }
+  for (final t in telecallers) {
+    if (t.phoneNumber == phone ||
+        (phone.length >= 10 && t.phoneNumber.endsWith(phone)) ||
+        (t.phoneNumber.length >= 10 && phone.endsWith(t.phoneNumber))) {
+      return t.name;
+    }
+  }
+  return 'Staff';
 }
