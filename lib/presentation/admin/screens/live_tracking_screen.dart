@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,12 +30,61 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
   List<LatLng> _routePoints = [];
   List<_MapVisitData> _visitLogs = [];
   bool _isLoadingRoute = false;
+  bool _hasAutoCentered = false;
+
+  void _checkAutoSelectAndCenter(List<_StaffLocationData> validLocations) {
+    if (_hasAutoCentered || validLocations.isEmpty) return;
+
+    final targetStaff = validLocations.where((s) => s.isOnline).firstOrNull ?? validLocations.first;
+    _hasAutoCentered = true;
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _listenToStaffRouteAndVisits(targetStaff.phoneNumber, targetStaff.name);
+      if (targetStaff.latitude != 0.0 && targetStaff.longitude != 0.0) {
+        _mapController.move(LatLng(targetStaff.latitude, targetStaff.longitude), 14.5);
+      }
+    });
+  }
+
+  void _recenterToStaff(List<_StaffLocationData> validLocations) {
+    if (_selectedStaffPhone != null) {
+      final selected = validLocations.where((s) => s.phoneNumber == _selectedStaffPhone).firstOrNull;
+      if (selected != null && selected.latitude != 0.0) {
+        _mapController.move(LatLng(selected.latitude, selected.longitude), 15.0);
+        return;
+      }
+    }
+
+    if (_routePoints.isNotEmpty) {
+      _mapController.move(_routePoints.last, 15.0);
+      return;
+    }
+
+    if (validLocations.isNotEmpty) {
+      final first = validLocations.where((s) => s.isOnline).firstOrNull ?? validLocations.first;
+      _mapController.move(LatLng(first.latitude, first.longitude), 14.5);
+    }
+  }
+
+  StreamSubscription? _routeSub;
+  StreamSubscription? _visitSub;
 
   // Default Map center (Hyderabad, India)
   final LatLng _defaultCenter = const LatLng(17.3850, 78.4867);
 
-  Future<void> _fetchStaffRouteAndVisits(String phone, String name) async {
-    if (_selectedStaffPhone == phone && _routePoints.isNotEmpty) return;
+  @override
+  void dispose() {
+    _routeSub?.cancel();
+    _visitSub?.cancel();
+    super.dispose();
+  }
+
+  void _listenToStaffRouteAndVisits(String phone, String name) {
+    if (_selectedStaffPhone == phone && (_routeSub != null || _visitSub != null)) return;
+
+    _routeSub?.cancel();
+    _visitSub?.cancel();
 
     setState(() {
       _selectedStaffPhone = phone;
@@ -45,35 +95,43 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
     final dateStr = DateFormat('yyyy-MM-dd').format(now);
     final attendanceDocId = '${phone}_$dateStr';
 
-    try {
-      // 1. Fetch background GPS route points
-      final routeSnap = await FirebaseFirestore.instance
-          .collection('attendance_logs')
-          .doc(attendanceDocId)
-          .collection('route_points')
-          .orderBy('timestamp', descending: false)
-          .get();
-
+    // 1. Listen to background GPS route points in real-time
+    _routeSub = FirebaseFirestore.instance
+        .collection('attendance_logs')
+        .doc(attendanceDocId)
+        .collection('route_points')
+        .orderBy('timestamp', descending: false)
+        .snapshots()
+        .listen((routeSnap) {
       final points = routeSnap.docs.map((doc) {
         final data = doc.data();
-        return LatLng(
-          (data['latitude'] as num).toDouble(),
-          (data['longitude'] as num).toDouble(),
-        );
+        final lat = (data['latitude'] ?? data['arrival_lat'] ?? 0.0) as num;
+        final lng = (data['longitude'] ?? data['arrival_lng'] ?? 0.0) as num;
+        return LatLng(lat.toDouble(), lng.toDouble());
       }).where((p) => p.latitude != 0.0 && p.longitude != 0.0).toList();
 
-      // 2. Fetch today's customer visits logged by this staff
-      final visitSnap = await FirebaseFirestore.instance
-          .collection('customer_visits')
-          .where('staff_phone', isEqualTo: phone)
-          .get();
+      _updateMapState(points: points);
+    }, onError: (e) {
+      debugPrint('Error listening to route points: $e');
+      if (mounted) setState(() => _isLoadingRoute = false);
+    });
 
+    // 2. Listen to geotagged visits in real-time
+    _visitSub = FirebaseFirestore.instance
+        .collection('customer_visits')
+        .where('staff_phone', isEqualTo: phone)
+        .snapshots()
+        .listen((visitSnap) {
       final visits = <_MapVisitData>[];
       int stopIndex = 1;
+
       for (final doc in visitSnap.docs) {
         final data = doc.data();
-        final lat = (data['arrival_latitude'] as num?)?.toDouble() ?? 0.0;
-        final lng = (data['arrival_longitude'] as num?)?.toDouble() ?? 0.0;
+        final latNum = (data['arrival_lat'] ?? data['arrival_latitude'] ?? data['latitude'] ?? 0.0) as num;
+        final lngNum = (data['arrival_lng'] ?? data['arrival_longitude'] ?? data['longitude'] ?? 0.0) as num;
+
+        final lat = latNum.toDouble();
+        final lng = lngNum.toDouble();
 
         DateTime time = now;
         final arrTime = data['arrival_time'];
@@ -100,31 +158,45 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
         }
       }
 
-      // Sort visits by time and assign stop numbers
       visits.sort((a, b) => a.arrivalTime.compareTo(b.arrivalTime));
       for (int i = 0; i < visits.length; i++) {
         visits[i] = visits[i].copyWith(stopNumber: i + 1);
       }
 
-      if (mounted) {
-        setState(() {
-          _routePoints = points;
-          _visitLogs = visits;
-          _isLoadingRoute = false;
-        });
-
-        // Center map on staff / last route point / last visit
-        final targetCenter = visits.isNotEmpty
-            ? LatLng(visits.last.latitude, visits.last.longitude)
-            : (points.isNotEmpty ? points.last : null);
-
-        if (targetCenter != null) {
-          _mapController.move(targetCenter, 14.5);
-        }
-      }
-    } catch (e) {
-      debugPrint('Error fetching route and visits for staff $phone: $e');
+      _updateMapState(visits: visits);
+    }, onError: (e) {
+      debugPrint('Error listening to customer visits: $e');
       if (mounted) setState(() => _isLoadingRoute = false);
+    });
+  }
+
+  void _updateMapState({List<LatLng>? points, List<_MapVisitData>? visits}) {
+    if (!mounted) return;
+
+    final newPoints = points ?? _routePoints;
+    final newVisits = visits ?? _visitLogs;
+
+    // Build unified journey path containing all points & visit geotags
+    final unifiedPoints = List<LatLng>.from(newPoints);
+    for (final v in newVisits) {
+      final p = LatLng(v.latitude, v.longitude);
+      if (!unifiedPoints.any((existing) => (existing.latitude - p.latitude).abs() < 0.0001 && (existing.longitude - p.longitude).abs() < 0.0001)) {
+        unifiedPoints.add(p);
+      }
+    }
+
+    setState(() {
+      _routePoints = unifiedPoints;
+      _visitLogs = newVisits;
+      _isLoadingRoute = false;
+    });
+
+    final targetCenter = newVisits.isNotEmpty
+        ? LatLng(newVisits.last.latitude, newVisits.last.longitude)
+        : (unifiedPoints.isNotEmpty ? unifiedPoints.last : null);
+
+    if (targetCenter != null) {
+      _mapController.move(targetCenter, 14.5);
     }
   }
 
@@ -279,6 +351,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                 ),
                 const SizedBox(height: 16),
               ],
+
               const SizedBox(height: 8),
               ElevatedButton.icon(
                 onPressed: () {
@@ -315,12 +388,12 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
 
   Widget _buildPhotoWidget(String photoUrl) {
     if (photoUrl.startsWith('http')) {
-      return Image.network(photoUrl, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported_rounded));
+      return Image.network(photoUrl, fit: BoxFit.cover, errorBuilder: (_, _, _) => const Icon(Icons.image_not_supported_rounded));
     }
     try {
       final cleanBase64 = photoUrl.contains(',') ? photoUrl.split(',').last : photoUrl;
       final bytes = base64Decode(cleanBase64.replaceAll(RegExp(r'\s+'), ''));
-      return Image.memory(bytes, fit: BoxFit.cover, errorBuilder: (_, __, ___) => const Icon(Icons.image_not_supported_rounded));
+      return Image.memory(bytes, fit: BoxFit.cover, errorBuilder: (_, _, _) => const Icon(Icons.image_not_supported_rounded));
     } catch (_) {
       return const Icon(Icons.image_not_supported_rounded);
     }
@@ -331,6 +404,7 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
     final employeesAsync = ref.watch(employeesProvider);
+    final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     return Scaffold(
       appBar: AppBar(
@@ -358,323 +432,397 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
         ],
       ),
       body: StreamBuilder<QuerySnapshot>(
-        stream: FirebaseFirestore.instance.collection('staff_locations').snapshots(),
-        builder: (context, snapshot) {
-          if (snapshot.connectionState == ConnectionState.waiting) {
-            return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+        stream: FirebaseFirestore.instance
+            .collection('attendance_logs')
+            .where('date', isEqualTo: todayStr)
+            .snapshots(),
+        builder: (context, attendanceSnap) {
+          final attendanceDocs = attendanceSnap.data?.docs ?? [];
+          final Map<String, dynamic> activeDutyLogs = {};
+          for (final doc in attendanceDocs) {
+            final data = doc.data() as Map<String, dynamic>;
+            final isActive = data['is_active'] as bool? ?? false;
+            final phone = data['staff_phone'] as String?;
+            if (isActive && phone != null && phone.isNotEmpty) {
+              activeDutyLogs[phone] = data;
+            }
           }
 
-          final docs = snapshot.data?.docs ?? [];
-          final employees = employeesAsync.value ?? [];
-          final fieldStaffList = employees.where((e) => e.isFieldStaff).toList();
-          final fieldStaffPhones = fieldStaffList.map((e) => e.phoneNumber).toSet();
+          return StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('staff_locations').snapshots(),
+            builder: (context, snapshot) {
+              if (snapshot.connectionState == ConnectionState.waiting && !attendanceSnap.hasData) {
+                return const Center(child: CircularProgressIndicator(color: AppColors.primary));
+              }
 
-          final activeStaffList = docs.map((doc) {
-            final data = doc.data() as Map<String, dynamic>;
-            final timestampVal = data['timestamp'];
-            DateTime? updatedTime;
-            if (timestampVal is Timestamp) {
-              updatedTime = timestampVal.toDate();
-            }
+              final docs = snapshot.data?.docs ?? [];
+              final employees = employeesAsync.value ?? [];
+              final fieldStaffList = employees.where((e) => e.isFieldStaff).toList();
+              final fieldStaffPhones = fieldStaffList.map((e) => e.phoneNumber).toSet();
 
-            final rawIsOnline = data['isOnline'] as bool? ?? false;
-            final isFresh = updatedTime != null &&
-                DateTime.now().difference(updatedTime).inMinutes < 5;
-            final isOnline = rawIsOnline && isFresh;
+              final activeStaffList = docs.map((doc) {
+                final data = doc.data() as Map<String, dynamic>;
+                final phone = doc.id;
+                final timestampVal = data['timestamp'];
+                DateTime? updatedTime;
+                if (timestampVal is Timestamp) {
+                  updatedTime = timestampVal.toDate();
+                }
 
-            return _StaffLocationData(
-              phoneNumber: doc.id,
-              name: data['name'] as String? ?? 'Unknown Staff',
-              latitude: (data['latitude'] as num?)?.toDouble() ?? 0.0,
-              longitude: (data['longitude'] as num?)?.toDouble() ?? 0.0,
-              isOnline: isOnline,
-              lastUpdated: updatedTime,
-            );
-          }).where((staff) => fieldStaffPhones.contains(staff.phoneNumber)).toList();
+                final rawIsOnline = data['isOnline'] as bool? ?? false;
+                final isRecentPing = updatedTime != null &&
+                    DateTime.now().difference(updatedTime).inMinutes < 15;
 
-          final validLocations = activeStaffList.where((s) => s.latitude != 0.0 && s.longitude != 0.0).toList();
+                final activeLog = activeDutyLogs[phone];
+                final hasActiveDuty = activeLog != null;
 
-          // Generate live staff markers
-          final List<Marker> staffMarkers = validLocations.map((staff) {
-            final isSelected = _selectedStaffPhone == staff.phoneNumber;
-            return Marker(
-              point: LatLng(staff.latitude, staff.longitude),
-              width: 120,
-              height: 75,
-              child: GestureDetector(
-                onTap: () {
-                  HapticFeedback.lightImpact();
-                  _fetchStaffRouteAndVisits(staff.phoneNumber, staff.name);
-                },
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: isSelected ? AppColors.primary : cardColor,
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(
-                          color: staff.isOnline ? AppColors.success : AppColors.textTertiary,
-                          width: 1.5,
-                        ),
-                        boxShadow: AppShadows.card,
-                      ),
-                      child: Text(
-                        staff.name,
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 9,
-                          fontWeight: FontWeight.w700,
-                          color: isSelected
-                              ? Colors.white
-                              : (isDark ? Colors.white : AppColors.textPrimary),
-                        ),
-                        overflow: TextOverflow.ellipsis,
-                        maxLines: 1,
-                      ),
-                    ),
-                    const SizedBox(height: 4),
-                    Stack(
-                      alignment: Alignment.center,
+                final isOnline = hasActiveDuty || (rawIsOnline && isRecentPing);
+
+                double lat = (data['latitude'] as num?)?.toDouble() ?? 0.0;
+                double lng = (data['longitude'] as num?)?.toDouble() ?? 0.0;
+
+                if ((lat == 0.0 || lng == 0.0) && activeLog != null) {
+                  lat = (activeLog['start_latitude'] as num?)?.toDouble() ?? 0.0;
+                  lng = (activeLog['start_longitude'] as num?)?.toDouble() ?? 0.0;
+                }
+
+                return _StaffLocationData(
+                  phoneNumber: phone,
+                  name: data['name'] as String? ?? (activeLog?['staff_name'] as String? ?? 'Unknown Staff'),
+                  latitude: lat,
+                  longitude: lng,
+                  isOnline: isOnline,
+                  lastUpdated: updatedTime,
+                );
+              }).where((staff) => fieldStaffPhones.contains(staff.phoneNumber)).toList();
+
+              for (final staff in fieldStaffList) {
+                final phone = staff.phoneNumber;
+                final activeLog = activeDutyLogs[phone];
+                if (activeLog != null && !activeStaffList.any((s) => s.phoneNumber == phone)) {
+                  final startLat = (activeLog['start_latitude'] as num?)?.toDouble() ?? 0.0;
+                  final startLng = (activeLog['start_longitude'] as num?)?.toDouble() ?? 0.0;
+                  activeStaffList.add(_StaffLocationData(
+                    phoneNumber: phone,
+                    name: staff.name,
+                    latitude: startLat,
+                    longitude: startLng,
+                    isOnline: true,
+                  ));
+                }
+              }
+
+              final validLocations = activeStaffList.where((s) => s.latitude != 0.0 && s.longitude != 0.0).toList();
+              _checkAutoSelectAndCenter(validLocations);
+
+              // Generate live staff markers
+              final List<Marker> staffMarkers = validLocations.map((staff) {
+                final isSelected = _selectedStaffPhone == staff.phoneNumber;
+                return Marker(
+                  point: LatLng(staff.latitude, staff.longitude),
+                  width: 120,
+                  height: 75,
+                  child: GestureDetector(
+                    onTap: () {
+                      HapticFeedback.lightImpact();
+                      _listenToStaffRouteAndVisits(staff.phoneNumber, staff.name);
+                      if (staff.latitude != 0.0 && staff.longitude != 0.0) {
+                        _mapController.move(LatLng(staff.latitude, staff.longitude), 14.5);
+                      }
+                    },
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
                       children: [
                         Container(
-                          width: 24,
-                          height: 24,
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                           decoration: BoxDecoration(
-                            color: (staff.isOnline ? AppColors.success : AppColors.textTertiary).withValues(alpha: 0.25),
-                            shape: BoxShape.circle,
-                          ),
-                        ),
-                        Icon(
-                          Icons.location_on_rounded,
-                          size: 26,
-                          color: staff.isOnline ? AppColors.success : AppColors.textTertiary,
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            );
-          }).toList();
-
-          // Generate visit log markers
-          final List<Marker> visitMarkers = _showVisitMarkers
-              ? _visitLogs.map((visit) {
-                  return Marker(
-                    point: LatLng(visit.latitude, visit.longitude),
-                    width: 120,
-                    height: 60,
-                    child: GestureDetector(
-                      onTap: () {
-                        HapticFeedback.lightImpact();
-                        _showVisitDetailsSheet(context, visit, isDark);
-                      },
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                            decoration: BoxDecoration(
-                              color: AppColors.accent,
-                              borderRadius: BorderRadius.circular(6),
-                              boxShadow: AppShadows.card,
-                            ),
-                            child: Text(
-                              'Stop #${visit.stopNumber}: ${visit.customerName}',
-                              style: GoogleFonts.plusJakartaSans(
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
-                                color: Colors.white,
-                              ),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Container(
-                            padding: const EdgeInsets.all(3),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              shape: BoxShape.circle,
-                              boxShadow: AppShadows.card,
-                            ),
-                            child: CircleAvatar(
-                              radius: 9,
-                              backgroundColor: AppColors.accent,
-                              child: Text(
-                                '${visit.stopNumber}',
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 9,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  );
-                }).toList()
-              : [];
-
-          return Stack(
-            children: [
-              // 1. OpenStreetMap Tile Map
-              FlutterMap(
-                mapController: _mapController,
-                options: MapOptions(
-                  initialCenter: validLocations.isNotEmpty
-                      ? LatLng(validLocations.first.latitude, validLocations.first.longitude)
-                      : _defaultCenter,
-                  initialZoom: 13.0,
-                  maxZoom: 18.0,
-                  minZoom: 4.0,
-                ),
-                children: [
-                  TileLayer(
-                    urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                    userAgentPackageName: 'com.ht.telecaller_mobile_app',
-                  ),
-                  if (_showRouteLine && _routePoints.length > 1)
-                    PolylineLayer(
-                      polylines: [
-                        Polyline(
-                          points: _routePoints,
-                          strokeWidth: 4.5,
-                          color: AppColors.primary,
-                        ),
-                      ],
-                    ),
-                  MarkerLayer(markers: [...visitMarkers, ...staffMarkers]),
-                ],
-              ),
-
-              // 2. Loading Indicator for Route & Visit Fetching
-              if (_isLoadingRoute)
-                Positioned(
-                  top: 16,
-                  right: 16,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: cardColor,
-                      borderRadius: BorderRadius.circular(10),
-                      boxShadow: AppShadows.card,
-                    ),
-                    child: Row(
-                      children: [
-                        const SizedBox(
-                          width: 14,
-                          height: 14,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'Fetching route...',
-                          style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-
-              // 3. Horizontal Staff Bar Overlay
-              if (fieldStaffList.isNotEmpty)
-                Positioned(
-                  bottom: 20,
-                  left: 0,
-                  right: 0,
-                  height: 95,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    padding: const EdgeInsets.symmetric(horizontal: 16),
-                    itemCount: fieldStaffList.length,
-                    itemBuilder: (ctx, index) {
-                      final staff = fieldStaffList[index];
-                      final isSelected = _selectedStaffPhone == staff.phoneNumber;
-
-                      // Find location if online
-                      final locData = validLocations.where((l) => l.phoneNumber == staff.phoneNumber).firstOrNull;
-                      final isOnline = locData?.isOnline ?? false;
-
-                      return GestureDetector(
-                        onTap: () {
-                          HapticFeedback.lightImpact();
-                          _fetchStaffRouteAndVisits(staff.phoneNumber, staff.name);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 200),
-                          margin: const EdgeInsets.only(right: 12),
-                          padding: const EdgeInsets.all(12),
-                          width: 180,
-                          decoration: BoxDecoration(
-                            color: cardColor,
-                            borderRadius: BorderRadius.circular(16),
+                            color: isSelected ? AppColors.primary : cardColor,
+                            borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: isSelected
-                                  ? AppColors.primary
-                                  : (isDark ? AppColors.borderDark : AppColors.border),
-                              width: isSelected ? 2.0 : 1.0,
+                              color: staff.isOnline ? AppColors.success : AppColors.textTertiary,
+                              width: 1.5,
                             ),
                             boxShadow: AppShadows.card,
                           ),
+                          child: Text(
+                            staff.name,
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 9,
+                              fontWeight: FontWeight.w700,
+                              color: isSelected
+                                  ? Colors.white
+                                  : (isDark ? Colors.white : AppColors.textPrimary),
+                            ),
+                            overflow: TextOverflow.ellipsis,
+                            maxLines: 1,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            Container(
+                              width: 24,
+                              height: 24,
+                              decoration: BoxDecoration(
+                                color: (staff.isOnline ? AppColors.success : AppColors.textTertiary).withValues(alpha: 0.25),
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            Icon(
+                              Icons.location_on_rounded,
+                              size: 26,
+                              color: staff.isOnline ? AppColors.success : AppColors.textTertiary,
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }).toList();
+
+              // Generate visit log markers
+              final List<Marker> visitMarkers = _showVisitMarkers
+                  ? _visitLogs.map((visit) {
+                      return Marker(
+                        point: LatLng(visit.latitude, visit.longitude),
+                        width: 120,
+                        height: 60,
+                        child: GestureDetector(
+                          onTap: () {
+                            HapticFeedback.lightImpact();
+                            _showVisitDetailsSheet(context, visit, isDark);
+                          },
                           child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.center,
+                            mainAxisSize: MainAxisSize.min,
                             children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      staff.name,
-                                      style: GoogleFonts.plusJakartaSans(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: isDark ? Colors.white : AppColors.textPrimary,
-                                      ),
-                                      overflow: TextOverflow.ellipsis,
-                                    ),
-                                  ),
-                                  Container(
-                                    width: 7,
-                                    height: 7,
-                                    decoration: BoxDecoration(
-                                      color: isOnline ? AppColors.success : AppColors.textTertiary,
-                                      shape: BoxShape.circle,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 4),
-                              Text(
-                                isOnline ? 'Active On Duty' : 'Off Duty',
-                                style: GoogleFonts.plusJakartaSans(
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.w600,
-                                  color: isOnline ? AppColors.success : AppColors.textSecondary,
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: AppColors.accent,
+                                  borderRadius: BorderRadius.circular(6),
+                                  boxShadow: AppShadows.card,
                                 ),
-                              ),
-                              if (isSelected && _visitLogs.isNotEmpty) ...[
-                                const SizedBox(height: 2),
-                                Text(
-                                  '${_visitLogs.length} visit stops logged',
+                                child: Text(
+                                  'Stop #${visit.stopNumber}: ${visit.customerName}',
                                   style: GoogleFonts.plusJakartaSans(
                                     fontSize: 9,
                                     fontWeight: FontWeight.bold,
-                                    color: AppColors.accent,
+                                    color: Colors.white,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                              const SizedBox(height: 2),
+                              Container(
+                                padding: const EdgeInsets.all(3),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  boxShadow: AppShadows.card,
+                                ),
+                                child: CircleAvatar(
+                                  radius: 9,
+                                  backgroundColor: AppColors.accent,
+                                  child: Text(
+                                    '${visit.stopNumber}',
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 9,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
                                   ),
                                 ),
-                              ],
+                              ),
                             ],
                           ),
                         ),
                       );
-                    },
+                    }).toList()
+                  : [];
+
+              return Stack(
+                children: [
+                  // 1. OpenStreetMap Tile Map
+                  FlutterMap(
+                    mapController: _mapController,
+                    options: MapOptions(
+                      initialCenter: validLocations.isNotEmpty
+                          ? LatLng(validLocations.first.latitude, validLocations.first.longitude)
+                          : _defaultCenter,
+                      initialZoom: 13.0,
+                      maxZoom: 18.0,
+                      minZoom: 4.0,
+                    ),
+                    children: [
+                      TileLayer(
+                        urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
+                        userAgentPackageName: 'com.ht.telecaller_mobile_app',
+                      ),
+                      if (_showRouteLine && _routePoints.length > 1)
+                        PolylineLayer(
+                          polylines: [
+                            Polyline(
+                              points: _routePoints,
+                              strokeWidth: 4.5,
+                              color: AppColors.primary,
+                            ),
+                          ],
+                        ),
+                      MarkerLayer(markers: [...visitMarkers, ...staffMarkers]),
+                    ],
                   ),
-                ),
-            ],
+
+                  // 2. Loading Indicator for Route & Visit Fetching
+                  if (_isLoadingRoute)
+                    Positioned(
+                      top: 16,
+                      right: 16,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: cardColor,
+                          borderRadius: BorderRadius.circular(10),
+                          boxShadow: AppShadows.card,
+                        ),
+                        child: Row(
+                          children: [
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.primary),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'Fetching route...',
+                              style: GoogleFonts.plusJakartaSans(fontSize: 12, fontWeight: FontWeight.w600),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                  // 3. Recenter Button Floating Action
+                  Positioned(
+                    top: 16,
+                    left: 16,
+                    child: FloatingActionButton.small(
+                      heroTag: 'recenter_map',
+                      backgroundColor: cardColor,
+                      foregroundColor: AppColors.primary,
+                      elevation: 3,
+                      onPressed: () {
+                        HapticFeedback.lightImpact();
+                        _recenterToStaff(validLocations);
+                      },
+                      child: const Icon(Icons.my_location_rounded, size: 20),
+                    ),
+                  ),
+
+                  // 4. Horizontal Staff Bar Overlay
+                  if (fieldStaffList.isNotEmpty)
+                    Positioned(
+                      bottom: 20,
+                      left: 0,
+                      right: 0,
+                      height: 95,
+                      child: ListView.builder(
+                        scrollDirection: Axis.horizontal,
+                        padding: const EdgeInsets.symmetric(horizontal: 16),
+                        itemCount: fieldStaffList.length,
+                        itemBuilder: (ctx, index) {
+                          final staff = fieldStaffList[index];
+                          final isSelected = _selectedStaffPhone == staff.phoneNumber;
+
+                          final locData = validLocations.where((l) => l.phoneNumber == staff.phoneNumber).firstOrNull;
+                          final activeLog = activeDutyLogs[staff.phoneNumber];
+                          final isOnline = activeLog != null || (locData?.isOnline ?? false);
+
+                          return GestureDetector(
+                            onTap: () {
+                              HapticFeedback.lightImpact();
+                              _listenToStaffRouteAndVisits(staff.phoneNumber, staff.name);
+                              if (locData != null && locData.latitude != 0.0) {
+                                _mapController.move(LatLng(locData.latitude, locData.longitude), 14.5);
+                              } else {
+                                _recenterToStaff(validLocations);
+                              }
+                            },
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 200),
+                              margin: const EdgeInsets.only(right: 12),
+                              padding: const EdgeInsets.all(12),
+                              width: 180,
+                              decoration: BoxDecoration(
+                                color: cardColor,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(
+                                  color: isSelected
+                                      ? AppColors.primary
+                                      : (isDark ? AppColors.borderDark : AppColors.border),
+                                  width: isSelected ? 2.0 : 1.0,
+                                ),
+                                boxShadow: AppShadows.card,
+                              ),
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          staff.name,
+                                          style: GoogleFonts.plusJakartaSans(
+                                            fontSize: 13,
+                                            fontWeight: FontWeight.w700,
+                                            color: isDark ? Colors.white : AppColors.textPrimary,
+                                          ),
+                                          overflow: TextOverflow.ellipsis,
+                                        ),
+                                      ),
+                                      Container(
+                                        width: 7,
+                                        height: 7,
+                                        decoration: BoxDecoration(
+                                          color: isOnline ? AppColors.success : AppColors.textTertiary,
+                                          shape: BoxShape.circle,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 4),
+                                  Text(
+                                    isOnline ? 'Active On Duty' : 'Off Duty',
+                                    style: GoogleFonts.plusJakartaSans(
+                                      fontSize: 10,
+                                      fontWeight: FontWeight.w600,
+                                      color: isOnline ? AppColors.success : AppColors.textSecondary,
+                                    ),
+                                  ),
+                                  if (isSelected && _visitLogs.isNotEmpty) ...[
+                                    const SizedBox(height: 2),
+                                    Text(
+                                      '${_visitLogs.length} visit stops logged',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 9,
+                                        fontWeight: FontWeight.bold,
+                                        color: AppColors.accent,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                ],
+              );
+            },
           );
         },
       ),

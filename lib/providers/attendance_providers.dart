@@ -136,6 +136,23 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
           .doc(docId)
           .set(newAttendance.toJson(), SetOptions(merge: true));
 
+      // Update staff_locations live document immediately on startDuty
+      try {
+        await FirebaseFirestore.instance
+            .collection('staff_locations')
+            .doc(targetPhone)
+            .set({
+          'name': targetName,
+          'phoneNumber': targetPhone,
+          'latitude': pos?.latitude ?? 0.0,
+          'longitude': pos?.longitude ?? 0.0,
+          'timestamp': FieldValue.serverTimestamp(),
+          'isOnline': true,
+        }, SetOptions(merge: true));
+      } catch (e) {
+        debugPrint('Failed to update staff_locations on startDuty: $e');
+      }
+
       state = AsyncValue.data(newAttendance);
       return true;
     } catch (e, st) {

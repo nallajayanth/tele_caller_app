@@ -40,18 +40,25 @@ class VisitModel {
   });
 
   factory VisitModel.fromJson(Map<String, dynamic> json) {
+    final lat = (json['arrival_lat'] ?? json['arrival_latitude'] ?? json['latitude'] ?? 0.0) as num;
+    final lng = (json['arrival_lng'] ?? json['arrival_longitude'] ?? json['longitude'] ?? 0.0) as num;
+
     return VisitModel(
-      id: json['id'] as String,
-      staffPhone: json['staff_phone'] as String,
+      id: json['id'] as String? ?? '',
+      staffPhone: json['staff_phone'] as String? ?? '',
       staffName: json['staff_name'] as String? ?? 'Staff Member',
-      customerName: json['customer_name'] as String,
+      customerName: json['customer_name'] as String? ?? 'Customer',
       customerType: json['customer_type'] as String? ?? 'doctor',
       address: json['address'] as String? ?? '',
-      arrivalTime: DateTime.parse(json['arrival_time'] as String),
-      departureTime: json['departure_time'] != null ? DateTime.parse(json['departure_time'] as String) : null,
+      arrivalTime: json['arrival_time'] != null
+          ? DateTime.tryParse(json['arrival_time'].toString()) ?? DateTime.now()
+          : DateTime.now(),
+      departureTime: json['departure_time'] != null
+          ? DateTime.tryParse(json['departure_time'].toString())
+          : null,
       visitDurationMinutes: (json['visit_duration_minutes'] as num?)?.toInt() ?? 0,
-      arrivalLat: (json['arrival_lat'] as num).toDouble(),
-      arrivalLng: (json['arrival_lng'] as num).toDouble(),
+      arrivalLat: lat.toDouble(),
+      arrivalLng: lng.toDouble(),
       targetLat: json['target_lat'] != null ? (json['target_lat'] as num).toDouble() : null,
       targetLng: json['target_lng'] != null ? (json['target_lng'] as num).toDouble() : null,
       photoUrl: json['photo_url'] as String?,
@@ -75,6 +82,8 @@ class VisitModel {
       'visit_duration_minutes': visitDurationMinutes,
       'arrival_lat': arrivalLat,
       'arrival_lng': arrivalLng,
+      'arrival_latitude': arrivalLat,
+      'arrival_longitude': arrivalLng,
       'target_lat': targetLat,
       'target_lng': targetLng,
       'photo_url': photoUrl,

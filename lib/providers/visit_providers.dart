@@ -56,31 +56,38 @@ class VisitsNotifier extends StateNotifier<AsyncValue<List<VisitModel>>> {
     String? photoUrl,
     double? targetLat,
     double? targetLng,
+    double? arrivalLat,
+    double? arrivalLng,
   }) async {
     if (_userPhone == null || _userPhone.isEmpty) return false;
 
     try {
-      // 1. Capture current arrival GPS location
-      Position? position;
-      try {
-        position = await Geolocator.getCurrentPosition(
-          desiredAccuracy: LocationAccuracy.high,
-          timeLimit: const Duration(seconds: 10),
-        );
-      } catch (_) {
-        position = await Geolocator.getLastKnownPosition();
+      // 1. Capture or use passed arrival GPS location
+      double finalLat = arrivalLat ?? 0.0;
+      double finalLng = arrivalLng ?? 0.0;
+
+      if (finalLat == 0.0 || finalLng == 0.0) {
+        Position? position;
+        try {
+          position = await Geolocator.getCurrentPosition(
+            desiredAccuracy: LocationAccuracy.high,
+            timeLimit: const Duration(seconds: 10),
+          );
+        } catch (_) {
+          position = await Geolocator.getLastKnownPosition();
+        }
+        finalLat = position?.latitude ?? 0.0;
+        finalLng = position?.longitude ?? 0.0;
       }
 
-      final arrivalLat = position?.latitude ?? 0.0;
-      final arrivalLng = position?.longitude ?? 0.0;
       final now = DateTime.now();
 
       // 2. Visit Verification Engine: Check if distance to registered target > 100 meters
       bool isMismatch = false;
-      if (targetLat != null && targetLng != null && arrivalLat != 0.0) {
+      if (targetLat != null && targetLng != null && finalLat != 0.0) {
         final distanceMeters = Geolocator.distanceBetween(
-          arrivalLat,
-          arrivalLng,
+          finalLat,
+          finalLng,
           targetLat,
           targetLng,
         );
@@ -100,8 +107,8 @@ class VisitsNotifier extends StateNotifier<AsyncValue<List<VisitModel>>> {
         customerType: customerType,
         address: address,
         arrivalTime: now,
-        arrivalLat: arrivalLat,
-        arrivalLng: arrivalLng,
+        arrivalLat: finalLat,
+        arrivalLng: finalLng,
         targetLat: targetLat,
         targetLng: targetLng,
         photoUrl: photoUrl,
@@ -112,6 +119,39 @@ class VisitsNotifier extends StateNotifier<AsyncValue<List<VisitModel>>> {
       );
 
       await docRef.set(visit.toJson());
+
+      // 3. Append geotag point to today's journey route points in Firestore
+      if (finalLat != 0.0 && finalLng != 0.0) {
+        final dateStr = DateFormat('yyyy-MM-dd').format(now);
+        final attendanceDocId = '${_userPhone}_$dateStr';
+        await FirebaseFirestore.instance
+            .collection('attendance_logs')
+            .doc(attendanceDocId)
+            .collection('route_points')
+            .add({
+          'latitude': finalLat,
+          'longitude': finalLng,
+          'speed': 0.0,
+          'accuracy': 5.0,
+          'is_mocked': false,
+          'timestamp': now.toIso8601String(),
+          'log_id': docRef.id,
+          'label': customerName,
+        });
+
+        // Also update staff's latest live position
+        await FirebaseFirestore.instance
+            .collection('staff_locations')
+            .doc(_userPhone)
+            .set({
+          'name': _userName ?? 'Staff Member',
+          'phoneNumber': _userPhone,
+          'latitude': finalLat,
+          'longitude': finalLng,
+          'timestamp': FieldValue.serverTimestamp(),
+          'isOnline': true,
+        }, SetOptions(merge: true));
+      }
 
       await loadTodayVisits();
       return true;

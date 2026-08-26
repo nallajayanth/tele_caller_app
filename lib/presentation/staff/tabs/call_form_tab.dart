@@ -629,6 +629,8 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
         remarks: _showCustomRemarksField ? _remarksCtrl.text.trim() : (_selectedStandardRemark ?? _responseCtrl.text.trim()),
         nextFollowUpDate: DateFormat('yyyy-MM-dd').format(_followUpDate),
         photoUrl: _capturedImage?.path,
+        arrivalLat: _capturedLat,
+        arrivalLng: _capturedLng,
       );
     }
 

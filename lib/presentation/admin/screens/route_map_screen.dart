@@ -46,15 +46,44 @@ class _RouteMapScreenState extends ConsumerState<RouteMapScreen> {
 
       final points = snap.docs.map((doc) {
         final data = doc.data();
-        return LatLng(
-          (data['latitude'] as num).toDouble(),
-          (data['longitude'] as num).toDouble(),
-        );
-      }).toList();
+        final lat = (data['latitude'] ?? data['arrival_lat'] ?? 0.0) as num;
+        final lng = (data['longitude'] ?? data['arrival_lng'] ?? 0.0) as num;
+        return LatLng(lat.toDouble(), lng.toDouble());
+      }).where((p) => p.latitude != 0.0 && p.longitude != 0.0).toList();
+
+      // Fetch customer visits for geotag stop markers
+      final visitSnap = await FirebaseFirestore.instance
+          .collection('customer_visits')
+          .where('staff_phone', isEqualTo: widget.staffPhone)
+          .get();
+
+      final visits = <LatLng>[];
+      for (final doc in visitSnap.docs) {
+        final data = doc.data();
+        final latNum = (data['arrival_lat'] ?? data['arrival_latitude'] ?? data['latitude'] ?? 0.0) as num;
+        final lngNum = (data['arrival_lng'] ?? data['arrival_longitude'] ?? data['longitude'] ?? 0.0) as num;
+        final lat = latNum.toDouble();
+        final lng = lngNum.toDouble();
+
+        if (lat != 0.0 && lng != 0.0) {
+          final timeStr = data['arrival_time']?.toString() ?? '';
+          if (timeStr.startsWith(widget.dateStr)) {
+            visits.add(LatLng(lat, lng));
+          }
+        }
+      }
+
+      // Merge visit geotags into journey points if missing
+      final unifiedPoints = List<LatLng>.from(points);
+      for (final v in visits) {
+        if (!unifiedPoints.any((p) => (p.latitude - v.latitude).abs() < 0.0001 && (p.longitude - v.longitude).abs() < 0.0001)) {
+          unifiedPoints.add(v);
+        }
+      }
 
       if (mounted) {
         setState(() {
-          _routePoints = points;
+          _routePoints = unifiedPoints;
           _isLoading = false;
         });
       }
