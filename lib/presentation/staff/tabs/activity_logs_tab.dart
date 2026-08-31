@@ -8,6 +8,7 @@ import '../../../data/models/call_log_model.dart';
 import '../../../providers/call_log_providers.dart';
 import '../../../providers/order_providers.dart';
 import '../widgets/activity_log_card.dart';
+import '../../admin/views/admin_edit_modal.dart';
 
 class ActivityLogsTab extends ConsumerStatefulWidget {
   const ActivityLogsTab({super.key});
@@ -471,6 +472,14 @@ class _ActivityLogsTabState extends ConsumerState<ActivityLogsTab> {
                           return ActivityLogCard(
                             log: dayLogs[j],
                             index: i * 5 + j,
+                            onEdit: () {
+                              showModalBottomSheet(
+                                context: context,
+                                isScrollControlled: true,
+                                backgroundColor: Colors.transparent,
+                                builder: (_) => AdminEditModal(log: dayLogs[j]),
+                              );
+                            },
                           );
                         }),
                       ],

@@ -11,25 +11,19 @@ class NotificationsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final cardColor = isDark ? AppColors.darkSurface : Colors.white;
+    final todayStr = DateFormat('yyyy-MM-dd').format(DateTime.now());
 
     return Scaffold(
       appBar: AppBar(
         title: Text(
-          'Security & Alert Logs',
-          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold),
+          "Today's Follow-up Alerts",
+          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 16),
         ),
-        actions: [
-          IconButton(
-            tooltip: 'Clear All Alerts',
-            icon: const Icon(Icons.delete_sweep_rounded),
-            onPressed: () => _confirmClearAll(context),
-          ),
-        ],
       ),
       body: StreamBuilder<QuerySnapshot>(
         stream: FirebaseFirestore.instance
-            .collection('notifications')
-            .orderBy('timestamp', descending: true)
+            .collection('customer_visits')
+            .where('nextFollowUpDate', isEqualTo: todayStr)
             .snapshots(),
         builder: (context, snapshot) {
           if (snapshot.connectionState == ConnectionState.waiting) {
@@ -39,16 +33,39 @@ class NotificationsScreen extends StatelessWidget {
           final docs = snapshot.data?.docs ?? [];
           if (docs.isEmpty) {
             return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.notifications_off_rounded, size: 48, color: Colors.grey.shade400),
-                  const SizedBox(height: 12),
-                  Text(
-                    'No security or operational alerts logged.',
-                    style: GoogleFonts.plusJakartaSans(color: AppColors.textTertiary, fontSize: 13),
-                  ),
-                ],
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withValues(alpha: 0.1),
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(Icons.event_available_rounded, size: 40, color: AppColors.primary),
+                    ),
+                    const SizedBox(height: 16),
+                    Text(
+                      "No Follow-ups Today",
+                      style: GoogleFonts.plusJakartaSans(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        color: isDark ? Colors.white : AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      "There are no scheduled follow-up visits matching today's date.",
+                      style: GoogleFonts.plusJakartaSans(
+                        color: AppColors.textTertiary,
+                        fontSize: 11,
+                      ),
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
               ),
             );
           }
@@ -59,54 +76,15 @@ class NotificationsScreen extends StatelessWidget {
             itemBuilder: (ctx, idx) {
               final doc = docs[idx];
               final data = doc.data() as Map<String, dynamic>;
-              final title = data['title'] as String? ?? 'Alert';
-              final body = data['body'] as String? ?? '';
-              final type = data['type'] as String? ?? 'info';
-              final timestampVal = data['timestamp'];
-              
+              final customerName = data['customerName'] as String? ?? 'Customer';
+              final customerType = data['customerType'] as String? ?? 'doctor';
+              final staffName = data['staffName'] as String? ?? 'Staff Member';
+              final remarks = data['remarks'] as String? ?? 'No remarks provided.';
+              final timestampVal = data['arrivalTime'];
+
               DateTime time = DateTime.now();
               if (timestampVal is Timestamp) {
                 time = timestampVal.toDate();
-              } else if (timestampVal is String) {
-                time = DateTime.tryParse(timestampVal) ?? DateTime.now();
-              }
-
-              IconData icon = Icons.info_outline_rounded;
-              Color color = AppColors.primary;
-
-              switch (type) {
-                case 'mock_gps':
-                  icon = Icons.gps_fixed_rounded;
-                  color = AppColors.error;
-                  break;
-                case 'low_battery':
-                  icon = Icons.battery_alert_rounded;
-                  color = Colors.orange;
-                  break;
-                case 'internet_loss':
-                  icon = Icons.signal_wifi_off_rounded;
-                  color = Colors.orange.shade700;
-                  break;
-                case 'long_idle':
-                  icon = Icons.bedtime_rounded;
-                  color = Colors.blue;
-                  break;
-                case 'duty_start':
-                  icon = Icons.play_circle_fill_rounded;
-                  color = AppColors.success;
-                  break;
-                case 'duty_end':
-                  icon = Icons.stop_circle_rounded;
-                  color = AppColors.error;
-                  break;
-                case 'missing_photo':
-                  icon = Icons.no_photography_rounded;
-                  color = AppColors.error;
-                  break;
-                case 'completed_visit':
-                  icon = Icons.check_circle_rounded;
-                  color = AppColors.success;
-                  break;
               }
 
               return Card(
@@ -123,60 +101,76 @@ class NotificationsScreen extends StatelessWidget {
                   leading: Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.1),
+                      color: AppColors.primary.withValues(alpha: 0.1),
                       shape: BoxShape.circle,
                     ),
-                    child: Icon(icon, color: color, size: 20),
+                    child: const Icon(Icons.event_note_rounded, color: AppColors.primary, size: 20),
                   ),
                   title: Row(
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Expanded(
                         child: Text(
-                          title,
+                          'Follow-up: $customerName',
                           style: GoogleFonts.plusJakartaSans(
                             fontWeight: FontWeight.bold,
                             fontSize: 13,
                           ),
                         ),
                       ),
-                      Text(
-                        DateFormat('hh:mm a').format(time),
-                        style: GoogleFonts.plusJakartaSans(
-                          fontSize: 10,
-                          color: AppColors.textTertiary,
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: AppColors.primary.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          customerType.toUpperCase(),
+                          style: GoogleFonts.plusJakartaSans(
+                            fontSize: 8,
+                            fontWeight: FontWeight.bold,
+                            color: AppColors.primary,
+                          ),
                         ),
                       ),
                     ],
                   ),
                   subtitle: Padding(
-                    padding: const EdgeInsets.only(top: 4.0),
+                    padding: const EdgeInsets.only(top: 6.0),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          body,
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 11,
-                            color: isDark ? Colors.white70 : AppColors.textSecondary,
-                            height: 1.4,
+                        RichText(
+                          text: TextSpan(
+                            style: GoogleFonts.plusJakartaSans(
+                              fontSize: 11,
+                              color: isDark ? Colors.white70 : AppColors.textSecondary,
+                            ),
+                            children: [
+                              const TextSpan(text: 'Assigned Staff: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                              TextSpan(text: '$staffName\n'),
+                              const TextSpan(text: 'Remarks: ', style: TextStyle(fontWeight: FontWeight.bold)),
+                              TextSpan(text: remarks),
+                            ],
                           ),
                         ),
-                        const SizedBox(height: 4),
-                        Text(
-                          DateFormat('dd MMM yyyy').format(time),
-                          style: GoogleFonts.plusJakartaSans(
-                            fontSize: 9,
-                            color: AppColors.textTertiary,
-                            fontWeight: FontWeight.bold,
-                          ),
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Icon(Icons.access_time_rounded, size: 10, color: AppColors.textTertiary),
+                            const SizedBox(width: 4),
+                            Text(
+                              'Logged: ${DateFormat('dd MMM, hh:mm a').format(time)}',
+                              style: GoogleFonts.plusJakartaSans(
+                                fontSize: 9,
+                                color: AppColors.textTertiary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
-                  ),
-                  trailing: IconButton(
-                    icon: const Icon(Icons.clear_rounded, size: 16, color: Colors.grey),
-                    onPressed: () => FirebaseFirestore.instance.collection('notifications').doc(doc.id).delete(),
                   ),
                 ),
               );
@@ -185,34 +179,5 @@ class NotificationsScreen extends StatelessWidget {
         },
       ),
     );
-  }
-
-  Future<void> _confirmClearAll(BuildContext context) async {
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Clear All Alerts?'),
-        content: const Text('This will delete all logged alert entries permanently.'),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(false),
-            child: const Text('Cancel'),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(true),
-            child: const Text('Clear All', style: TextStyle(color: AppColors.error)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm == true) {
-      final snap = await FirebaseFirestore.instance.collection('notifications').get();
-      final batch = FirebaseFirestore.instance.batch();
-      for (final doc in snap.docs) {
-        batch.delete(doc.reference);
-      }
-      await batch.commit();
-    }
   }
 }

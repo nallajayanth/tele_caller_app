@@ -32,14 +32,18 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
   late final TextEditingController _responseCtrl;
   late final TextEditingController _remarksCtrl;
   late final TextEditingController _orderCtrl;
+  late final TextEditingController _productSearchCtrl;
 
   late String? _selectedStatus;
   late DateTime _followUpDate;
   bool _isSaving = false;
 
   Map<String, int> _selectedProductQuantities = {};
+  final Map<String, double> _selectedProductPrices = {};
+  final Map<String, TextEditingController> _priceCtrls = {};
   String? _selectedDropdownProduct;
   bool _showCustomProductField = false;
+  String _productSearchQuery = '';
 
   String _formatProductText(String product) {
     try {
@@ -71,6 +75,12 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
     _selectedStatus =
         log.connectedStatus.isEmpty ? null : log.connectedStatus;
     _followUpDate = log.nextFollowUpDate;
+    _productSearchCtrl = TextEditingController();
+    _productSearchCtrl.addListener(() {
+      setState(() {
+        _productSearchQuery = _productSearchCtrl.text;
+      });
+    });
 
     bool parsedJson = false;
     if (log.product.trim().startsWith('[') && log.product.trim().endsWith(']')) {
@@ -81,9 +91,12 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
             if (item is Map) {
               final id = item['id']?.toString() ?? '';
               final qtyVal = item['qty'];
+              final priceVal = item['price'];
               final qty = qtyVal is num ? qtyVal.toInt() : (int.tryParse(qtyVal?.toString() ?? '') ?? 0);
+              final price = priceVal is num ? priceVal.toDouble() : (double.tryParse(priceVal?.toString() ?? '') ?? 0.0);
               if (id.isNotEmpty && qty > 0) {
                 _selectedProductQuantities[id] = qty;
+                _selectedProductPrices[id] = price;
               }
             }
           }
@@ -115,6 +128,10 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
     _responseCtrl.dispose();
     _remarksCtrl.dispose();
     _orderCtrl.dispose();
+    _productSearchCtrl.dispose();
+    for (final ctrl in _priceCtrls.values) {
+      ctrl.dispose();
+    }
     super.dispose();
   }
 
@@ -157,10 +174,11 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
           (prod) => prod.id == prodId,
           orElse: () => ProductModel(id: prodId, name: 'Unknown', price: 0.0, stock: 0),
         );
+        final price = _selectedProductPrices[prodId] ?? p.price;
         selectedItems.add({
           'id': p.id,
           'name': p.name,
-          'price': p.price,
+          'price': price,
           'qty': qty,
         });
       });
@@ -455,80 +473,407 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
   );
 }
 
-  Widget _buildProductSelector(BuildContext context, bool isDark, List<ProductModel> products, Color cardColor) {
-    if (_selectedStatus == 'Order Received') {
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Select Products & Quantities *',
-            style: GoogleFonts.plusJakartaSans(fontSize: 13, fontWeight: FontWeight.bold, color: AppColors.primary),
-          ),
-          const SizedBox(height: 10),
-          if (products.isEmpty)
-            Text(
-              'No products configured. Contact admin.',
-              style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppColors.error),
-            )
-          else
-            ...products.map((p) {
-              final qty = _selectedProductQuantities[p.id] ?? 0;
-              return Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: Row(
+  Widget _buildStockBadge(int stock) {
+    final isOk = stock > 0;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: isOk
+            ? AppColors.success.withValues(alpha: 0.12)
+            : AppColors.error.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(5),
+      ),
+      child: Text(
+        isOk ? 'Stock: $stock' : 'Out of stock',
+        style: GoogleFonts.plusJakartaSans(
+          fontSize: 10,
+          fontWeight: FontWeight.w600,
+          color: isOk ? AppColors.success : AppColors.error,
+        ),
+      ),
+    );
+  }
+
+  TextEditingController _priceCtrlFor(String prodId, double initialPrice) {
+    return _priceCtrls.putIfAbsent(
+      prodId,
+      () => TextEditingController(text: initialPrice.toStringAsFixed(0)),
+    );
+  }
+
+  void _showAdminProductPicker(List<ProductModel> products) {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => DraggableScrollableSheet(
+        initialChildSize: 0.85,
+        minChildSize: 0.5,
+        maxChildSize: 0.95,
+        expand: false,
+        builder: (_, scrollCtrl) {
+          final isDark = Theme.of(context).brightness == Brightness.dark;
+          return StatefulBuilder(
+            builder: (context, setModalState) {
+              final query = _productSearchQuery.trim().toLowerCase();
+              final filteredList = products.where((p) => p.name.toLowerCase().contains(query)).toList();
+
+              return Container(
+                decoration: BoxDecoration(
+                  color: isDark ? AppColors.darkBackground : AppColors.lightBackground,
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+                ),
+                child: Column(
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    // Handle
+                    Padding(
+                      padding: const EdgeInsets.only(top: 12, bottom: 8),
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: AppColors.textTertiary.withValues(alpha: 0.3),
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    // Header
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text(
-                            p.name,
-                            style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 14),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'Select Products & Set Price',
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.w700,
+                                  color: isDark ? Colors.white : AppColors.textPrimary,
+                                ),
+                              ),
+                              Text(
+                                '${products.length} products available',
+                                style: GoogleFonts.plusJakartaSans(
+                                  fontSize: 11,
+                                  color: AppColors.textTertiary,
+                                ),
+                              ),
+                            ],
                           ),
-                          Text(
-                            'Price: ₹${p.price.toStringAsFixed(0)}',
-                            style: GoogleFonts.plusJakartaSans(fontSize: 12, color: AppColors.textTertiary),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded),
+                            onPressed: () => Navigator.of(ctx).pop(),
                           ),
                         ],
                       ),
                     ),
-                    Row(
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.remove_circle_outline_rounded, color: AppColors.primary, size: 20),
-                          onPressed: qty > 0
-                              ? () {
-                                  setState(() {
-                                    final newQty = qty - 1;
-                                    if (newQty == 0) {
-                                      _selectedProductQuantities.remove(p.id);
-                                    } else {
-                                      _selectedProductQuantities[p.id] = newQty;
-                                    }
-                                    _recalculateOrderFromProducts(products);
-                                  });
-                                }
+                    const Divider(height: 1),
+
+                    // Search bar
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+                      child: TextField(
+                        controller: _productSearchCtrl,
+                        style: GoogleFonts.plusJakartaSans(fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Search by product name...',
+                          hintStyle: GoogleFonts.plusJakartaSans(color: AppColors.textTertiary),
+                          prefixIcon: const Icon(Icons.search_rounded, color: AppColors.textTertiary, size: 20),
+                          suffixIcon: _productSearchQuery.isNotEmpty
+                              ? IconButton(
+                                  icon: const Icon(Icons.clear_rounded, size: 18, color: AppColors.textTertiary),
+                                  onPressed: () {
+                                    _productSearchCtrl.clear();
+                                    setModalState(() {
+                                      _productSearchQuery = '';
+                                    });
+                                  },
+                                )
                               : null,
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                          filled: true,
+                          fillColor: isDark
+                              ? Colors.white.withValues(alpha: 0.06)
+                              : AppColors.border.withValues(alpha: 0.4),
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
                         ),
-                        Text(
-                          '$qty',
-                          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.bold, fontSize: 15),
+                        onChanged: (val) {
+                          setModalState(() {
+                            _productSearchQuery = val;
+                          });
+                        },
+                      ),
+                    ),
+
+                    // List
+                    Expanded(
+                      child: filteredList.isEmpty
+                          ? Center(
+                              child: Text(
+                                'No products match your search',
+                                style: GoogleFonts.plusJakartaSans(fontSize: 13, color: AppColors.textTertiary),
+                              ),
+                            )
+                          : ListView.builder(
+                              controller: scrollCtrl,
+                              padding: const EdgeInsets.all(16),
+                              itemCount: filteredList.length,
+                              itemBuilder: (context, i) {
+                                final p = filteredList[i];
+                                final qty = _selectedProductQuantities[p.id] ?? 0;
+                                final isSelected = qty > 0;
+
+                                return Container(
+                                  margin: const EdgeInsets.only(bottom: 8),
+                                  decoration: BoxDecoration(
+                                    color: isSelected
+                                        ? AppColors.primary.withValues(alpha: 0.07)
+                                        : (isDark ? Colors.white.withValues(alpha: 0.02) : Colors.grey.withValues(alpha: 0.03)),
+                                    borderRadius: BorderRadius.circular(12),
+                                    border: isSelected
+                                        ? Border.all(color: AppColors.primary.withValues(alpha: 0.3), width: 1.2)
+                                        : Border.all(color: isDark ? AppColors.borderDark : AppColors.border, width: 0.8),
+                                  ),
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Row(
+                                          crossAxisAlignment: CrossAxisAlignment.center,
+                                          children: [
+                                            Expanded(
+                                              child: Column(
+                                                crossAxisAlignment: CrossAxisAlignment.start,
+                                                children: [
+                                                  Text(
+                                                    p.name,
+                                                    style: GoogleFonts.plusJakartaSans(
+                                                      fontSize: 13,
+                                                      fontWeight: isSelected ? FontWeight.w700 : FontWeight.w600,
+                                                      color: isSelected
+                                                          ? AppColors.primary
+                                                          : (isDark ? Colors.white : AppColors.textPrimary),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(height: 4),
+                                                  Row(
+                                                    children: [
+                                                      _buildStockBadge(p.stock),
+                                                      const SizedBox(width: 8),
+                                                      Text(
+                                                        'Price: ₹${p.price.toStringAsFixed(0)}',
+                                                        style: GoogleFonts.plusJakartaSans(
+                                                          fontSize: 11,
+                                                          fontWeight: FontWeight.w600,
+                                                          color: AppColors.textTertiary,
+                                                        ),
+                                                      ),
+                                                    ],
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                            const SizedBox(width: 8),
+                                            Row(
+                                              mainAxisSize: MainAxisSize.min,
+                                              children: [
+                                                if (isSelected) ...[
+                                                  _QtyButton(
+                                                    icon: Icons.remove_rounded,
+                                                    onTap: () {
+                                                      setModalState(() {
+                                                        final newQty = qty - 1;
+                                                        if (newQty <= 0) {
+                                                          _selectedProductQuantities.remove(p.id);
+                                                        } else {
+                                                          _selectedProductQuantities[p.id] = newQty;
+                                                        }
+                                                        _recalculateOrderFromProducts(products);
+                                                      });
+                                                      setState(() {});
+                                                    },
+                                                  ),
+                                                  Container(
+                                                    width: 36,
+                                                    alignment: Alignment.center,
+                                                    child: Text(
+                                                      '$qty',
+                                                      style: GoogleFonts.plusJakartaSans(
+                                                        fontSize: 13,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: AppColors.primary,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ],
+                                                _QtyButton(
+                                                  icon: Icons.add_rounded,
+                                                  onTap: () {
+                                                    setModalState(() {
+                                                      _selectedProductQuantities[p.id] = qty + 1;
+                                                      if (!_selectedProductPrices.containsKey(p.id)) {
+                                                        _selectedProductPrices[p.id] = p.price;
+                                                      }
+                                                      _recalculateOrderFromProducts(products);
+                                                    });
+                                                    setState(() {});
+                                                  },
+                                                ),
+                                              ],
+                                            ),
+                                          ],
+                                        ),
+                                        if (isSelected) ...[
+                                          const Divider(height: 16),
+                                          Row(
+                                            children: [
+                                              const Icon(Icons.currency_rupee_rounded, size: 14, color: AppColors.accent),
+                                              const SizedBox(width: 4),
+                                              Expanded(
+                                                child: SizedBox(
+                                                  height: 36,
+                                                  child: TextField(
+                                                    controller: _priceCtrlFor(p.id, _selectedProductPrices[p.id] ?? p.price),
+                                                    keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                                                    inputFormatters: [
+                                                      FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                                                    ],
+                                                    onChanged: (v) {
+                                                      final price = double.tryParse(v) ?? 0.0;
+                                                      setModalState(() {
+                                                        _selectedProductPrices[p.id] = price;
+                                                        _recalculateOrderFromProducts(products);
+                                                      });
+                                                      setState(() {});
+                                                    },
+                                                    style: GoogleFonts.plusJakartaSans(
+                                                      fontSize: 12,
+                                                      fontWeight: FontWeight.w600,
+                                                      color: AppColors.accent,
+                                                    ),
+                                                    decoration: InputDecoration(
+                                                      hintText: 'Enter price',
+                                                      hintStyle: GoogleFonts.plusJakartaSans(fontSize: 11, color: AppColors.textTertiary),
+                                                      isDense: true,
+                                                      contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                                                      filled: true,
+                                                      fillColor: AppColors.accent.withValues(alpha: 0.06),
+                                                      border: OutlineInputBorder(
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        borderSide: BorderSide(color: AppColors.accent.withValues(alpha: 0.3)),
+                                                      ),
+                                                      enabledBorder: OutlineInputBorder(
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        borderSide: BorderSide(color: AppColors.accent.withValues(alpha: 0.3)),
+                                                      ),
+                                                      focusedBorder: OutlineInputBorder(
+                                                        borderRadius: BorderRadius.circular(8),
+                                                        borderSide: const BorderSide(color: AppColors.accent, width: 1.5),
+                                                      ),
+                                                    ),
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 12),
+                                              Text(
+                                                'Subtotal: ₹${(qty * (_selectedProductPrices[p.id] ?? p.price)).toStringAsFixed(0)}',
+                                                style: GoogleFonts.plusJakartaSans(
+                                                  fontSize: 13,
+                                                  fontWeight: FontWeight.w700,
+                                                  color: AppColors.primary,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+
+                    // Confirm Selection Button
+                    Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(ctx).pop(),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.primary,
+                          foregroundColor: Colors.white,
+                          minimumSize: const Size(double.infinity, 48),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
-                        IconButton(
-                          icon: const Icon(Icons.add_circle_outline_rounded, color: AppColors.primary, size: 20),
-                          onPressed: () {
-                            setState(() {
-                              _selectedProductQuantities[p.id] = qty + 1;
-                              _recalculateOrderFromProducts(products);
-                            });
-                          },
+                        child: Text(
+                          'Confirm Selection',
+                          style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w700, fontSize: 15),
                         ),
-                      ],
+                      ),
                     ),
                   ],
                 ),
               );
-            }),
+            },
+          );
+        },
+      ),
+    );
+  }
+
+  Widget _buildProductSelector(BuildContext context, bool isDark, List<ProductModel> products, Color cardColor) {
+    if (_selectedStatus == 'Order Received') {
+      final selectedCount = _selectedProductQuantities.values.fold<int>(0, (sum, val) => sum + val);
+
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Products & Quantities *',
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              fontWeight: FontWeight.bold,
+              color: AppColors.primary,
+            ),
+          ),
+          const SizedBox(height: 10),
+          GestureDetector(
+            onTap: () => _showAdminProductPicker(products),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+                border: Border.all(
+                  color: AppColors.primary.withValues(alpha: 0.3),
+                  width: 1.5,
+                ),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.search_rounded, color: AppColors.primary, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      selectedCount > 0
+                          ? '$selectedCount product(s) selected (₹${_orderCtrl.text})'
+                          : 'Search & select products...',
+                      style: GoogleFonts.plusJakartaSans(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: selectedCount > 0 ? AppColors.primary : AppColors.textTertiary,
+                      ),
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right_rounded, color: AppColors.primary),
+                ],
+              ),
+            ),
+          ),
         ],
       );
     } else {
@@ -583,11 +928,12 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
           (prod) => prod.id == prodId,
           orElse: () => ProductModel(id: prodId, name: 'Unknown', price: 0.0, stock: 0),
         );
-        total += p.price * qty;
+        final price = _selectedProductPrices[prodId] ?? p.price;
+        total += price * qty;
         selectedItems.add({
           'id': p.id,
           'name': p.name,
-          'price': p.price,
+          'price': price,
           'qty': qty,
         });
       });
@@ -635,6 +981,35 @@ class _EditField extends StatelessWidget {
       decoration: InputDecoration(
         labelText: label,
         prefixIcon: Icon(icon, size: 20, color: AppColors.textTertiary),
+      ),
+    );
+  }
+}
+
+class _QtyButton extends StatelessWidget {
+  final IconData icon;
+  final VoidCallback? onTap;
+  const _QtyButton({required this.icon, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    final isEnabled = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        width: 30,
+        height: 30,
+        decoration: BoxDecoration(
+          color: isEnabled
+              ? AppColors.primary.withValues(alpha: 0.12)
+              : Colors.grey.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Icon(
+          icon,
+          size: 16,
+          color: isEnabled ? AppColors.primary : Colors.grey,
+        ),
       ),
     );
   }

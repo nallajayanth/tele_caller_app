@@ -293,7 +293,18 @@ class _FollowUpFilterScreenState extends ConsumerState<FollowUpFilterScreen> {
                             ),
                           );
                         }
-                        return ActivityLogCard(log: log, index: i);
+                        return ActivityLogCard(
+                          log: log,
+                          index: i,
+                          onEdit: () {
+                            showModalBottomSheet(
+                              context: context,
+                              isScrollControlled: true,
+                              backgroundColor: Colors.transparent,
+                              builder: (_) => AdminEditModal(log: log),
+                            );
+                          },
+                        );
                       },
                     ),
             ),

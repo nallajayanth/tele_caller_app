@@ -620,7 +620,10 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
         ),
         actions: [
           StreamBuilder<QuerySnapshot>(
-            stream: FirebaseFirestore.instance.collection('notifications').snapshots(),
+            stream: FirebaseFirestore.instance
+                .collection('customer_visits')
+                .where('nextFollowUpDate', isEqualTo: DateFormat('yyyy-MM-dd').format(DateTime.now()))
+                .snapshots(),
             builder: (context, snapshot) {
               final count = snapshot.data?.docs.length ?? 0;
               return Badge(
