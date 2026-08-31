@@ -1,3 +1,5 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -58,6 +60,9 @@ class VisitsNotifier extends StateNotifier<AsyncValue<List<VisitModel>>> {
     double? targetLng,
     double? arrivalLat,
     double? arrivalLng,
+    DateTime? arrivalTime,
+    DateTime? departureTime,
+    int? visitDurationMinutes,
   }) async {
     if (_userPhone == null || _userPhone.isEmpty) return false;
 
@@ -76,11 +81,17 @@ class VisitsNotifier extends StateNotifier<AsyncValue<List<VisitModel>>> {
         } catch (_) {
           position = await Geolocator.getLastKnownPosition();
         }
+        if (position != null && position.isMocked) {
+          throw Exception('Mock/Fake GPS detected. Please disable fake GPS apps to log visits.');
+        }
         finalLat = position?.latitude ?? 0.0;
         finalLng = position?.longitude ?? 0.0;
       }
 
       final now = DateTime.now();
+      final effectiveArrival = arrivalTime ?? now;
+      final effectiveDeparture = departureTime ?? now;
+      final effectiveDuration = visitDurationMinutes ?? effectiveDeparture.difference(effectiveArrival).inMinutes;
 
       // 2. Visit Verification Engine: Check if distance to registered target > 100 meters
       bool isMismatch = false;
@@ -97,6 +108,22 @@ class VisitsNotifier extends StateNotifier<AsyncValue<List<VisitModel>>> {
         }
       }
 
+      String? finalPhotoUrl = photoUrl;
+      if (photoUrl != null && photoUrl.isNotEmpty) {
+        if (photoUrl.startsWith('/') || photoUrl.contains(':\\') || photoUrl.startsWith('file://')) {
+          try {
+            final cleanPath = photoUrl.startsWith('file://') ? photoUrl.substring(7) : photoUrl;
+            final file = File(cleanPath);
+            if (await file.exists()) {
+              final bytes = await file.readAsBytes();
+              finalPhotoUrl = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+            }
+          } catch (e) {
+            debugPrint('Error base64 encoding photoUrl inside logVisit: $e');
+          }
+        }
+      }
+
       final docRef = FirebaseFirestore.instance.collection('customer_visits').doc();
 
       final visit = VisitModel(
@@ -106,19 +133,36 @@ class VisitsNotifier extends StateNotifier<AsyncValue<List<VisitModel>>> {
         customerName: customerName,
         customerType: customerType,
         address: address,
-        arrivalTime: now,
+        arrivalTime: effectiveArrival,
+        departureTime: effectiveDeparture,
+        visitDurationMinutes: effectiveDuration,
         arrivalLat: finalLat,
         arrivalLng: finalLng,
         targetLat: targetLat,
         targetLng: targetLng,
-        photoUrl: photoUrl,
-        photoTimestamp: DateFormat('yyyy-MM-dd HH:mm:ss').format(now),
+        photoUrl: finalPhotoUrl,
+        photoTimestamp: DateFormat('yyyy-MM-dd HH:mm:ss').format(effectiveArrival),
         remarks: remarks,
         nextFollowUpDate: nextFollowUpDate,
         isLocationMismatch: isMismatch,
       );
 
       await docRef.set(visit.toJson());
+
+      // Trigger visit completion or missing photo alert/notification
+      try {
+        final isPhotoMissing = finalPhotoUrl == null || finalPhotoUrl.isEmpty;
+        await FirebaseFirestore.instance.collection('notifications').add({
+          'title': isPhotoMissing ? '⚠️ Visit Log Alert: Missing Photo' : '✓ Customer Visit Completed',
+          'body': isPhotoMissing
+              ? '${visit.staffName} completed a visit to ${visit.customerName} but did not upload the required photo proof.'
+              : '${visit.staffName} successfully logged a visit to ${visit.customerName} with live photo verification.',
+          'type': isPhotoMissing ? 'missing_photo' : 'completed_visit',
+          'staffPhone': visit.staffPhone,
+          'staffName': visit.staffName,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
 
       // 3. Append geotag point to today's journey route points in Firestore
       if (finalLat != 0.0 && finalLng != 0.0) {

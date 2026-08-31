@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'dart:async';
+import 'package:geolocator/geolocator.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../../core/constants/app_colors.dart';
@@ -23,10 +25,52 @@ class StaffDashboard extends ConsumerStatefulWidget {
 
 class _StaffDashboardState extends ConsumerState<StaffDashboard> {
   int _currentIndex = 0;
+  Timer? _permissionTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _startPermissionCheck();
+    });
+  }
+
+  @override
+  void dispose() {
+    _permissionTimer?.cancel();
+    super.dispose();
+  }
+
+  void _startPermissionCheck() {
+    _permissionTimer?.cancel();
+    _permissionTimer = Timer.periodic(const Duration(seconds: 15), (timer) async {
+      final user = ref.read(activeUserProvider);
+      if (user != null && user.role == 'staff' && user.isFieldStaff) {
+        final permission = await Geolocator.checkPermission();
+        if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+          // Revoked: End duty if active
+          final attendanceNotifier = ref.read(activeAttendanceProvider.notifier);
+          final attendance = ref.read(activeAttendanceProvider).value;
+          if (attendance != null && attendance.isActive) {
+            await attendanceNotifier.endDuty();
+          }
+
+          // Sign out
+          await ref.read(activeUserProvider.notifier).signOut();
+          _permissionTimer?.cancel();
+
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('Automatically signed out because location permissions were revoked.'),
+                backgroundColor: AppColors.error,
+                duration: Duration(seconds: 5),
+              ),
+            );
+          }
+        }
+      }
+    });
   }
 
   Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {

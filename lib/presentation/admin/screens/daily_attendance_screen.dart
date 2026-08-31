@@ -11,6 +11,7 @@ import '../../../data/models/attendance_model.dart';
 import '../../../data/models/telecaller_model.dart';
 import '../../../providers/attendance_providers.dart';
 import 'user_management_screen.dart';
+import 'route_map_screen.dart';
 
 class DailyAttendanceScreen extends ConsumerStatefulWidget {
   const DailyAttendanceScreen({super.key});
@@ -620,22 +621,38 @@ class _DailyAttendanceScreenState extends ConsumerState<DailyAttendanceScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           if (log.startLatitude != 0.0 || log.startLongitude != 0.0)
-                            Row(
-                              children: [
-                                const Icon(Icons.location_on_rounded, size: 13, color: AppColors.accent),
-                                const SizedBox(width: 4),
-                                Expanded(
-                                  child: Text(
-                                    'GPS: ${log.startLatitude.toStringAsFixed(4)}, ${log.startLongitude.toStringAsFixed(4)}',
-                                    style: GoogleFonts.plusJakartaSans(
-                                      fontSize: 11,
-                                      fontWeight: FontWeight.w600,
-                                      color: isDark ? Colors.white70 : AppColors.textPrimary,
+                            InkWell(
+                              onTap: () {
+                                HapticFeedback.lightImpact();
+                                Navigator.of(context).push(
+                                  MaterialPageRoute(
+                                    builder: (_) => RouteMapScreen(
+                                      staffPhone: log.staffPhone,
+                                      staffName: log.staffName,
+                                      dateStr: log.date,
                                     ),
-                                    overflow: TextOverflow.ellipsis,
                                   ),
-                                ),
-                              ],
+                                );
+                              },
+                              borderRadius: BorderRadius.circular(4),
+                              child: Row(
+                                children: [
+                                  const Icon(Icons.location_on_rounded, size: 13, color: AppColors.accent),
+                                  const SizedBox(width: 4),
+                                  Expanded(
+                                    child: Text(
+                                      'GPS: ${log.startLatitude.toStringAsFixed(4)}, ${log.startLongitude.toStringAsFixed(4)}',
+                                      style: GoogleFonts.plusJakartaSans(
+                                        fontSize: 11,
+                                        fontWeight: FontWeight.w600,
+                                        color: AppColors.primary,
+                                        decoration: TextDecoration.underline,
+                                      ),
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                ],
+                              ),
                             ),
                           const SizedBox(height: 4),
                           Row(

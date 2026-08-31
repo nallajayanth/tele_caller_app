@@ -97,6 +97,9 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
         if (pos == null) {
           throw Exception('Location (GPS) is required to start your duty shift.');
         }
+        if (pos.isMocked) {
+          throw Exception('Mock/Fake GPS detected. Please disable fake GPS apps to start duty.');
+        }
       }
 
       int batteryLevel = 100;
@@ -135,6 +138,18 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
           .collection('attendance_logs')
           .doc(docId)
           .set(newAttendance.toJson(), SetOptions(merge: true));
+
+      // Trigger start notification alert to admin
+      try {
+        await FirebaseFirestore.instance.collection('notifications').add({
+          'title': 'Duty Started',
+          'body': '${newAttendance.staffName} started their shift. Battery: ${newAttendance.startBattery}%, Network: ${newAttendance.startNetwork}.',
+          'type': 'duty_start',
+          'staffPhone': newAttendance.staffPhone,
+          'staffName': newAttendance.staffName,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
 
       // Update staff_locations live document immediately on startDuty
       try {
@@ -216,6 +231,18 @@ class AttendanceNotifier extends StateNotifier<AsyncValue<AttendanceModel?>> {
           .collection('attendance_logs')
           .doc(current.id)
           .update(updated.toJson());
+
+      // Trigger end notification alert to admin
+      try {
+        await FirebaseFirestore.instance.collection('notifications').add({
+          'title': 'Duty Ended',
+          'body': '${updated.staffName} ended their shift. Battery: ${updated.endBattery}%, Network: ${updated.endNetwork}. Work Time: ${diffMinutes} minutes.',
+          'type': 'duty_end',
+          'staffPhone': updated.staffPhone,
+          'staffName': updated.staffName,
+          'timestamp': FieldValue.serverTimestamp(),
+        });
+      } catch (_) {}
 
       // Set staff as offline in staff_locations collection on duty end
       final phone = _userPhone ?? current.staffPhone;

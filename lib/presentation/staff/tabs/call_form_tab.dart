@@ -232,9 +232,9 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
       final picker = ImagePicker();
       final picked = await picker.pickImage(
         source: ImageSource.camera,
-        maxWidth: 1200,
-        maxHeight: 1200,
-        imageQuality: 85,
+        maxWidth: 600,
+        maxHeight: 600,
+        imageQuality: 60,
       );
       if (picked != null && mounted) {
         setState(() {
@@ -622,15 +622,36 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
     final success = await ref.read(callLogsProvider.notifier).addLog(log);
 
     if (isField) {
+      final now = DateTime.now();
+      final arrivalDateTime = DateTime(now.year, now.month, now.day, _arrivalTime.hour, _arrivalTime.minute);
+      var departureDateTime = DateTime(now.year, now.month, now.day, _departureTime.hour, _departureTime.minute);
+      if (departureDateTime.isBefore(arrivalDateTime)) {
+        departureDateTime = departureDateTime.add(const Duration(days: 1));
+      }
+      final duration = departureDateTime.difference(arrivalDateTime).inMinutes;
+
+      String? photoBase64;
+      if (_capturedImage != null) {
+        try {
+          final bytes = await _capturedImage!.readAsBytes();
+          photoBase64 = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+        } catch (e) {
+          debugPrint('Error base64 encoding photo in call tab UI: $e');
+        }
+      }
+
       await ref.read(visitsProvider.notifier).logVisit(
         customerName: _nameCtrl.text.trim(),
         customerType: 'doctor',
         address: _placeCtrl.text.trim(),
         remarks: _showCustomRemarksField ? _remarksCtrl.text.trim() : (_selectedStandardRemark ?? _responseCtrl.text.trim()),
         nextFollowUpDate: DateFormat('yyyy-MM-dd').format(_followUpDate),
-        photoUrl: _capturedImage?.path,
+        photoUrl: photoBase64 ?? _capturedImage?.path,
         arrivalLat: _capturedLat,
         arrivalLng: _capturedLng,
+        arrivalTime: arrivalDateTime,
+        departureTime: departureDateTime,
+        visitDurationMinutes: duration,
       );
     }
 

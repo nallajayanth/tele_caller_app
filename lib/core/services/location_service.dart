@@ -1,13 +1,21 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:battery_plus/battery_plus.dart';
 
 class LocationService {
   LocationService._();
+
+  static bool _hasWarnedBattery = false;
+  static bool _hasWarnedMock = false;
+  static bool _hasWarnedNetwork = false;
+  static bool _hasWarnedIdle = false;
+  static int _consecutiveIdlePings = 0;
 
   static const String _notificationChannelId = 'ht_fcm_channel';
   static const int _notificationId = 888;
@@ -65,6 +73,96 @@ class LocationService {
         // Anti-Fraud Alert: Log if fake GPS is detected
         if (isMocked) {
           debugPrint('ANTI-FRAUD WARNING: Fake/Mock GPS detected for staff $phone');
+          if (!_hasWarnedMock) {
+            _hasWarnedMock = true;
+            try {
+              await FirebaseFirestore.instance.collection('notifications').add({
+                'title': '🚨 Security Alert: Mock GPS Detected!',
+                'body': '${name ?? "Staff"} is using a Fake/Mock GPS location provider.',
+                'type': 'mock_gps',
+                'staffPhone': phone,
+                'staffName': name ?? 'Staff Member',
+                'timestamp': FieldValue.serverTimestamp(),
+              });
+            } catch (_) {}
+          }
+        } else {
+          _hasWarnedMock = false;
+        }
+
+        // Get telemetry details
+        int batteryLevel = 100;
+        try {
+          batteryLevel = await Battery().batteryLevel;
+        } catch (_) {}
+
+        String networkStatus = 'Disconnected';
+        try {
+          final lookup = await InternetAddress.lookup('example.com');
+          if (lookup.isNotEmpty && lookup[0].rawAddress.isNotEmpty) {
+            networkStatus = 'Connected';
+          }
+        } catch (_) {}
+
+        // Trigger battery alert
+        if (batteryLevel < 20) {
+          if (!_hasWarnedBattery) {
+            _hasWarnedBattery = true;
+            try {
+              await FirebaseFirestore.instance.collection('notifications').add({
+                'title': '⚠️ Low Battery Alert',
+                'body': '${name ?? "Staff"} device has critically low battery ($batteryLevel%).',
+                'type': 'low_battery',
+                'staffPhone': phone,
+                'staffName': name ?? 'Staff Member',
+                'timestamp': FieldValue.serverTimestamp(),
+              });
+            } catch (_) {}
+          }
+        } else {
+          _hasWarnedBattery = false;
+        }
+
+        // Trigger network status alert
+        if (networkStatus == 'Disconnected') {
+          if (!_hasWarnedNetwork) {
+            _hasWarnedNetwork = true;
+            try {
+              await FirebaseFirestore.instance.collection('notifications').add({
+                'title': '📶 Internet Connectivity Lost',
+                'body': '${name ?? "Staff"} device lost connection. Tracking updates will sync when online.',
+                'type': 'internet_loss',
+                'staffPhone': phone,
+                'staffName': name ?? 'Staff Member',
+                'timestamp': FieldValue.serverTimestamp(),
+              });
+            } catch (_) {}
+          }
+        } else {
+          _hasWarnedNetwork = false;
+        }
+
+        // Inactivity/Idle alert
+        if (position.speed < 0.5) {
+          _consecutiveIdlePings++;
+          if (_consecutiveIdlePings >= 20) { // 15 mins of idle time
+            if (!_hasWarnedIdle) {
+              _hasWarnedIdle = true;
+              try {
+                await FirebaseFirestore.instance.collection('notifications').add({
+                  'title': '⏱️ Prolonged Inactivity Alert',
+                  'body': '${name ?? "Staff"} has been idle/stationary for more than 15 minutes.',
+                  'type': 'long_idle',
+                  'staffPhone': phone,
+                  'staffName': name ?? 'Staff Member',
+                  'timestamp': FieldValue.serverTimestamp(),
+                });
+              } catch (_) {}
+            }
+          }
+        } else {
+          _consecutiveIdlePings = 0;
+          _hasWarnedIdle = false;
         }
 
         // 1. Update live location doc
@@ -79,6 +177,8 @@ class LocationService {
           'speed': position.speed,
           'accuracy': position.accuracy,
           'isMocked': isMocked,
+          'batteryLevel': batteryLevel,
+          'networkStatus': networkStatus,
           'timestamp': FieldValue.serverTimestamp(),
           'isOnline': true,
         }, SetOptions(merge: true));

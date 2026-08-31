@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -29,6 +30,24 @@ class _LogVisitScreenState extends ConsumerState<LogVisitScreen> {
   File? _capturedImage;
   bool _isSaving = false;
 
+  TimeOfDay _arrivalTime = TimeOfDay.fromDateTime(DateTime.now().subtract(const Duration(minutes: 30)));
+  TimeOfDay _departureTime = TimeOfDay.now();
+
+  String _calculateVisitDuration() {
+    final now = DateTime.now();
+    final arrivalDt = DateTime(now.year, now.month, now.day, _arrivalTime.hour, _arrivalTime.minute);
+    var departureDt = DateTime(now.year, now.month, now.day, _departureTime.hour, _departureTime.minute);
+    if (departureDt.isBefore(arrivalDt)) {
+      departureDt = departureDt.add(const Duration(days: 1));
+    }
+    final diffMinutes = departureDt.difference(arrivalDt).inMinutes;
+    if (diffMinutes <= 0) return '0 Minutes';
+    if (diffMinutes < 60) return '$diffMinutes Minutes';
+    final hrs = diffMinutes ~/ 60;
+    final mins = diffMinutes % 60;
+    return mins > 0 ? '$hrs hr $mins mins' : '$hrs hr';
+  }
+
   @override
   void dispose() {
     _nameCtrl.dispose();
@@ -45,9 +64,9 @@ class _LogVisitScreenState extends ConsumerState<LogVisitScreen> {
       // Mandatory live camera capture (SRS #5: Gallery pick blocked)
       final picked = await picker.pickImage(
         source: ImageSource.camera,
-        maxWidth: 1200,
-        maxHeight: 1200,
-        imageQuality: 85,
+        maxWidth: 600,
+        maxHeight: 600,
+        imageQuality: 60,
       );
 
       if (picked != null) {
@@ -75,13 +94,34 @@ class _LogVisitScreenState extends ConsumerState<LogVisitScreen> {
     setState(() => _isSaving = true);
     HapticFeedback.mediumImpact();
 
+    final now = DateTime.now();
+    final arrivalDateTime = DateTime(now.year, now.month, now.day, _arrivalTime.hour, _arrivalTime.minute);
+    var departureDateTime = DateTime(now.year, now.month, now.day, _departureTime.hour, _departureTime.minute);
+    if (departureDateTime.isBefore(arrivalDateTime)) {
+      departureDateTime = departureDateTime.add(const Duration(days: 1));
+    }
+    final duration = departureDateTime.difference(arrivalDateTime).inMinutes;
+
+    String? photoBase64;
+    if (_capturedImage != null) {
+      try {
+        final bytes = await _capturedImage!.readAsBytes();
+        photoBase64 = 'data:image/jpeg;base64,${base64Encode(bytes)}';
+      } catch (e) {
+        debugPrint('Error base64 encoding photo in UI: $e');
+      }
+    }
+
     final success = await ref.read(visitsProvider.notifier).logVisit(
           customerName: _nameCtrl.text.trim(),
           customerType: _customerType,
           address: _addressCtrl.text.trim(),
           remarks: _remarksCtrl.text.trim(),
           nextFollowUpDate: _followUpCtrl.text.trim().isNotEmpty ? _followUpCtrl.text.trim() : null,
-          photoUrl: _capturedImage!.path,
+          photoUrl: photoBase64 ?? _capturedImage!.path,
+          arrivalTime: arrivalDateTime,
+          departureTime: departureDateTime,
+          visitDurationMinutes: duration,
         );
 
     if (mounted) {
@@ -210,6 +250,8 @@ class _LogVisitScreenState extends ConsumerState<LogVisitScreen> {
                 }
               },
             ),
+            const SizedBox(height: 20),
+            _buildVisitTimingSection(context, Theme.of(context).brightness == Brightness.dark),
             const SizedBox(height: 24),
 
             // Mandatory Photo Verification Card (SRS #5)
@@ -277,6 +319,110 @@ class _LogVisitScreenState extends ConsumerState<LogVisitScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  Widget _buildVisitTimingSection(BuildContext context, bool isDark) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'VISIT TIMING *',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 11,
+            fontWeight: FontWeight.w700,
+            color: Colors.grey,
+            letterSpacing: 1.2,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: [
+            Expanded(
+              child: GestureDetector(
+                onTap: () async {
+                  final picked = await showTimePicker(
+                    context: context,
+                    initialTime: _arrivalTime,
+                  );
+                  if (picked != null) setState(() => _arrivalTime = picked);
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Arrival Time *',
+                    prefixIcon: Icon(Icons.schedule_rounded, size: 18),
+                    border: OutlineInputBorder(),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _arrivalTime.format(context),
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : AppColors.textPrimary,
+                        ),
+                      ),
+                      const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: GestureDetector(
+                onTap: () async {
+                  final picked = await showTimePicker(
+                    context: context,
+                    initialTime: _departureTime,
+                  );
+                  if (picked != null) setState(() => _departureTime = picked);
+                },
+                child: InputDecorator(
+                  decoration: const InputDecoration(
+                    labelText: 'Departure Time *',
+                    prefixIcon: Icon(Icons.schedule_rounded, size: 18),
+                    border: OutlineInputBorder(),
+                  ),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        _departureTime.format(context),
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                          color: isDark ? Colors.white : AppColors.textPrimary,
+                        ),
+                      ),
+                      const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        InputDecorator(
+          decoration: const InputDecoration(
+            labelText: 'Visit Duration',
+            prefixIcon: Icon(Icons.timer_outlined, size: 18),
+            border: OutlineInputBorder(),
+            filled: true,
+          ),
+          child: Text(
+            _calculateVisitDuration(),
+            style: GoogleFonts.plusJakartaSans(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: isDark ? Colors.white70 : AppColors.textSecondary,
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

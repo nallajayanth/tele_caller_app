@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:csv/csv.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -27,6 +28,8 @@ import 'screens/user_management_screen.dart';
 import 'screens/product_management_screen.dart';
 import 'screens/live_tracking_screen.dart';
 import 'screens/daily_attendance_screen.dart';
+import 'screens/admin_reports_screen.dart';
+import 'screens/notifications_screen.dart';
 import 'views/admin_edit_modal.dart';
 import 'widgets/admin_log_card.dart';
 import 'widgets/metric_tile.dart';
@@ -242,6 +245,31 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
           ],
         ),
         actions: [
+          StreamBuilder<QuerySnapshot>(
+            stream: FirebaseFirestore.instance.collection('notifications').snapshots(),
+            builder: (context, snapshot) {
+              final count = snapshot.data?.docs.length ?? 0;
+              return Badge(
+                label: count > 0 ? Text('$count') : null,
+                isLabelVisible: count > 0,
+                child: IconButton(
+                  tooltip: 'Security Alerts',
+                  icon: Container(
+                    padding: const EdgeInsets.all(6),
+                    decoration: BoxDecoration(
+                      color: AppColors.primary.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: const Icon(Icons.notifications_active_rounded,
+                        color: AppColors.primary, size: 18),
+                  ),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const NotificationsScreen()),
+                  ),
+                ),
+              );
+            },
+          ),
           IconButton(
             tooltip: 'Daily Attendance',
             icon: Container(
@@ -1521,6 +1549,18 @@ class _AdminSettingsTab extends StatelessWidget {
             isDark: isDark,
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute(builder: (_) => const DailyAttendanceScreen()),
+            ),
+          ),
+          const SizedBox(height: 12),
+          _buildSettingsTile(
+            context: context,
+            title: 'Reports & Analytics',
+            subtitle: 'Filter, search and export daily reports',
+            icon: Icons.analytics_rounded,
+            color: const Color(0xFF3B82F6),
+            isDark: isDark,
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const AdminReportsScreen()),
             ),
           ),
           const SizedBox(height: 12),
