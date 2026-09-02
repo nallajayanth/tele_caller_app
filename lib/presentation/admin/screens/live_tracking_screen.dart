@@ -955,109 +955,180 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
                     ),
                   ),
 
-                  // Telemetry details card overlay for the selected staff member
-                  if (_selectedStaffPhone != null)
-                    _buildSelectedStaffTelemetryCard(validLocations, activeDutyLogs, isDark, cardColor),
+                  // Unified Bottom Live Dashboard Sheet
+                  Positioned(
+                    bottom: 0,
+                    left: 0,
+                    right: 0,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        // Selected staff telemetry summary card (docked right above the bottom staff list)
+                        if (_selectedStaffPhone != null)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(14, 0, 14, 8),
+                            child: _buildSelectedStaffTelemetryCard(validLocations, activeDutyLogs, isDark, cardColor),
+                          ),
 
-                  // 4. Horizontal Staff Bar Overlay
-                  if (fieldStaffList.isNotEmpty)
-                    Positioned(
-                      bottom: 20,
-                      left: 0,
-                      right: 0,
-                      height: 95,
-                      child: ListView.builder(
-                        scrollDirection: Axis.horizontal,
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        itemCount: fieldStaffList.length,
-                        itemBuilder: (ctx, index) {
-                          final staff = fieldStaffList[index];
-                          final isSelected = _selectedStaffPhone == staff.phoneNumber;
-
-                          final locData = validLocations.where((l) => l.phoneNumber == staff.phoneNumber).firstOrNull;
-                          final activeLog = activeDutyLogs[staff.phoneNumber];
-                          final isOnline = activeLog != null || (locData?.isOnline ?? false);
-
-                          return GestureDetector(
-                            onTap: () {
-                              HapticFeedback.lightImpact();
-                              _listenToStaffRouteAndVisits(staff.phoneNumber, staff.name);
-                              if (locData != null && locData.latitude != 0.0) {
-                                _mapController.move(LatLng(locData.latitude, locData.longitude), 14.5);
-                              } else {
-                                _recenterToStaff(validLocations);
-                              }
-                            },
-                            child: AnimatedContainer(
-                              duration: const Duration(milliseconds: 200),
-                              margin: const EdgeInsets.only(right: 12),
-                              padding: const EdgeInsets.all(12),
-                              width: 180,
-                              decoration: BoxDecoration(
-                                color: cardColor,
-                                borderRadius: BorderRadius.circular(16),
-                                border: Border.all(
-                                  color: isSelected
-                                      ? AppColors.primary
-                                      : (isDark ? AppColors.borderDark : AppColors.border),
-                                  width: isSelected ? 2.0 : 1.0,
+                        // Docked Bottom Staff Selector Dashboard
+                        if (fieldStaffList.isNotEmpty)
+                          Container(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            decoration: BoxDecoration(
+                              color: cardColor,
+                              borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Colors.black.withValues(alpha: 0.15),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, -4),
                                 ),
-                                boxShadow: AppShadows.card,
-                              ),
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Row(
+                              ],
+                            ),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+                                  child: Row(
                                     children: [
-                                      Expanded(
-                                        child: Text(
-                                          staff.name,
-                                          style: GoogleFonts.plusJakartaSans(
-                                            fontSize: 13,
-                                            fontWeight: FontWeight.w700,
-                                            color: isDark ? Colors.white : AppColors.textPrimary,
+                                      Text(
+                                        'LIVE FIELD STAFF (${fieldStaffList.length})',
+                                        style: GoogleFonts.plusJakartaSans(
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.w800,
+                                          color: AppColors.textTertiary,
+                                          letterSpacing: 0.8,
+                                        ),
+                                      ),
+                                      const Spacer(),
+                                      if (_selectedStaffPhone != null)
+                                        GestureDetector(
+                                          onTap: () {
+                                            HapticFeedback.lightImpact();
+                                            setState(() {
+                                              _selectedStaffPhone = null;
+                                              _routePoints = [];
+                                              _visitLogs = [];
+                                            });
+                                          },
+                                          child: Text(
+                                            'Clear Selection',
+                                            style: GoogleFonts.plusJakartaSans(
+                                              fontSize: 10,
+                                              fontWeight: FontWeight.bold,
+                                              color: AppColors.primary,
+                                            ),
                                           ),
-                                          overflow: TextOverflow.ellipsis,
                                         ),
-                                      ),
-                                      Container(
-                                        width: 7,
-                                        height: 7,
-                                        decoration: BoxDecoration(
-                                          color: isOnline ? AppColors.success : AppColors.textTertiary,
-                                          shape: BoxShape.circle,
-                                        ),
-                                      ),
                                     ],
                                   ),
-                                  const SizedBox(height: 4),
-                                  Text(
-                                    isOnline ? 'Active On Duty' : 'Off Duty',
-                                    style: GoogleFonts.plusJakartaSans(
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w600,
-                                      color: isOnline ? AppColors.success : AppColors.textSecondary,
-                                    ),
+                                ),
+                                const SizedBox(height: 6),
+                                SizedBox(
+                                  height: 72,
+                                  child: ListView.builder(
+                                    scrollDirection: Axis.horizontal,
+                                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                                    itemCount: fieldStaffList.length,
+                                    itemBuilder: (ctx, index) {
+                                      final staff = fieldStaffList[index];
+                                      final isSelected = _selectedStaffPhone == staff.phoneNumber;
+
+                                      final locData = validLocations.where((l) => l.phoneNumber == staff.phoneNumber).firstOrNull;
+                                      final activeLog = activeDutyLogs[staff.phoneNumber];
+                                      final isOnline = activeLog != null || (locData?.isOnline ?? false);
+
+                                      return GestureDetector(
+                                        onTap: () {
+                                          HapticFeedback.lightImpact();
+                                          _listenToStaffRouteAndVisits(staff.phoneNumber, staff.name);
+                                          if (locData != null && locData.latitude != 0.0) {
+                                            _mapController.move(LatLng(locData.latitude, locData.longitude), 14.5);
+                                          } else {
+                                            _recenterToStaff(validLocations);
+                                          }
+                                        },
+                                        child: AnimatedContainer(
+                                          duration: const Duration(milliseconds: 200),
+                                          margin: const EdgeInsets.only(right: 10),
+                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                          width: 165,
+                                          decoration: BoxDecoration(
+                                            color: isSelected
+                                                ? AppColors.primary.withValues(alpha: 0.1)
+                                                : (isDark ? AppColors.darkSurface : Colors.grey.shade50),
+                                            borderRadius: BorderRadius.circular(14),
+                                            border: Border.all(
+                                              color: isSelected
+                                                  ? AppColors.primary
+                                                  : (isDark ? AppColors.borderDark : AppColors.border),
+                                              width: isSelected ? 2.0 : 1.0,
+                                            ),
+                                          ),
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            mainAxisAlignment: MainAxisAlignment.center,
+                                            children: [
+                                              Row(
+                                                children: [
+                                                  Expanded(
+                                                    child: Text(
+                                                      staff.name,
+                                                      style: GoogleFonts.plusJakartaSans(
+                                                        fontSize: 12,
+                                                        fontWeight: FontWeight.w700,
+                                                        color: isSelected
+                                                            ? AppColors.primary
+                                                            : (isDark ? Colors.white : AppColors.textPrimary),
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                  Container(
+                                                    width: 7,
+                                                    height: 7,
+                                                    decoration: BoxDecoration(
+                                                      color: isOnline ? AppColors.success : AppColors.textTertiary,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                              const SizedBox(height: 2),
+                                              Text(
+                                                isOnline ? 'Active On Duty' : 'Off Duty',
+                                                style: GoogleFonts.plusJakartaSans(
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.w600,
+                                                  color: isOnline ? AppColors.success : AppColors.textSecondary,
+                                                ),
+                                              ),
+                                              if (isSelected && _visitLogs.isNotEmpty) ...[
+                                                const SizedBox(height: 2),
+                                                Text(
+                                                  '${_visitLogs.length} visit stops',
+                                                  style: GoogleFonts.plusJakartaSans(
+                                                    fontSize: 8,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: AppColors.accent,
+                                                  ),
+                                                ),
+                                              ],
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
                                   ),
-                                  if (isSelected && _visitLogs.isNotEmpty) ...[
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      '${_visitLogs.length} visit stops logged',
-                                      style: GoogleFonts.plusJakartaSans(
-                                        fontSize: 9,
-                                        fontWeight: FontWeight.bold,
-                                        color: AppColors.accent,
-                                      ),
-                                    ),
-                                  ],
-                                ],
-                              ),
+                                ),
+                              ],
                             ),
-                          );
-                        },
-                      ),
+                          ),
+                      ],
                     ),
+                  ),
                 ],
               );
             },
@@ -1094,17 +1165,13 @@ class _LiveTrackingScreenState extends ConsumerState<LiveTrackingScreen> {
     // Estimate speed in km/h
     final speedKmH = locData.speed * 3.6;
 
-    return Positioned(
-      top: 72,
-      left: 16,
-      right: 16,
-      child: Card(
-        elevation: 4,
-        color: cardColor.withValues(alpha: 0.95),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
-          side: BorderSide(color: isDark ? AppColors.borderDark : AppColors.border),
-        ),
+    return Card(
+      elevation: 4,
+      color: cardColor.withValues(alpha: 0.98),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(16),
+        side: BorderSide(color: isDark ? AppColors.borderDark : AppColors.border),
+      ),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           child: Column(

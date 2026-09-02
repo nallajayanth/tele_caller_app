@@ -21,12 +21,112 @@ class PerformanceTab extends ConsumerStatefulWidget {
 class _PerformanceTabState extends ConsumerState<PerformanceTab> {
   int _selectedTab = 0; // 0 = Daily Performance, 1 = Monthly Performance
   bool _isExporting = false;
+  DateTime _selectedDate = DateTime.now();
+  DateTime _selectedMonth = DateTime.now();
+
+  Future<void> _pickMonth(BuildContext context) async {
+    final now = DateTime.now();
+    final List<DateTime> months = List.generate(24, (index) {
+      return DateTime(now.year, now.month - index, 1);
+    });
+
+    final picked = await showModalBottomSheet<DateTime>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        final isDarkTheme = Theme.of(ctx).brightness == Brightness.dark;
+        return Container(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Text(
+                    'Select Performance Month',
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                      color: isDarkTheme ? Colors.white : AppColors.textPrimary,
+                    ),
+                  ),
+                  IconButton(
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: () => Navigator.pop(ctx),
+                  ),
+                ],
+              ),
+              const Divider(),
+              ConstrainedBox(
+                constraints: BoxConstraints(maxHeight: MediaQuery.of(context).size.height * 0.4),
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: months.length,
+                  itemBuilder: (context, index) {
+                    final m = months[index];
+                    final isSelected = m.year == _selectedMonth.year && m.month == _selectedMonth.month;
+                    final label = DateFormat('MMMM yyyy').format(m);
+
+                    return ListTile(
+                      dense: true,
+                      leading: Icon(
+                        Icons.calendar_month_rounded,
+                        color: isSelected ? AppColors.primary : Colors.grey,
+                      ),
+                      title: Text(
+                        label,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                          color: isSelected ? AppColors.primary : (isDarkTheme ? Colors.white70 : AppColors.textPrimary),
+                        ),
+                      ),
+                      trailing: isSelected
+                          ? const Icon(Icons.check_circle_rounded, color: AppColors.primary)
+                          : null,
+                      onTap: () {
+                        Navigator.pop(ctx, m);
+                      },
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+
+    if (picked != null) {
+      setState(() {
+        _selectedMonth = picked;
+      });
+    }
+  }
+
+  Future<void> _pickDate(BuildContext context) async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime(2020),
+      lastDate: DateTime.now(),
+    );
+    if (picked != null) {
+      setState(() {
+        _selectedDate = picked;
+      });
+    }
+  }
 
   Future<void> _exportPdf({
     required bool isDaily,
     required double target,
     required double achieved,
     required String periodTitle,
+    required DateTime targetDate,
   }) async {
     if (_isExporting) return;
     setState(() => _isExporting = true);
@@ -36,11 +136,10 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
       final activeUser = ref.read(activeUserProvider);
       final staffName = activeUser?.name ?? 'Staff';
       final pipelineStats = isDaily
-          ? ref.read(staffOrderStatsProvider)
-          : ref.read(staffMonthlyOrderStatsProvider);
+          ? ref.read(staffDailyOrderStatsFamily(targetDate))
+          : ref.read(staffMonthlyOrderStatsFamily(targetDate));
       final logsAsync = ref.read(staffLogsProvider);
 
-      final now = DateTime.now();
       final remaining = (target - achieved) > 0 ? (target - achieved) : 0.0;
       final percent = target > 0
           ? (achieved / target).clamp(0.0, 1.0)
@@ -51,14 +150,15 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
         if (isDaily) {
           filteredLogs = logs
               .where((l) =>
-                  l.date.year == now.year &&
-                  l.date.month == now.month &&
-                  l.date.day == now.day)
+                  l.date.year == targetDate.year &&
+                  l.date.month == targetDate.month &&
+                  l.date.day == targetDate.day)
               .toList();
         } else {
           filteredLogs = logs
-              .where(
-                  (l) => l.date.year == now.year && l.date.month == now.month)
+              .where((l) =>
+                  l.date.year == targetDate.year &&
+                  l.date.month == targetDate.month)
               .toList();
         }
       });
@@ -93,16 +193,15 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final monthlyTargetAsync = ref.watch(staffMonthlyTargetProvider);
-    final monthlyAchievement = ref.watch(staffMonthlyAchievementProvider);
-    final dailyTarget = ref.watch(staffDailyTargetProvider);
-    final dailyAchievement = ref.watch(staffDailyAchievementProvider);
-    final dailyStats = ref.watch(staffOrderStatsProvider);
-    final monthlyStats = ref.watch(staffMonthlyOrderStatsProvider);
+    final monthlyTargetAsync = ref.watch(staffMonthlyTargetFamily(_selectedMonth));
+    final monthlyAchievement = ref.watch(staffMonthlyAchievementFamily(_selectedMonth));
+    final dailyTarget = ref.watch(staffDailyTargetFamily(_selectedDate));
+    final dailyAchievement = ref.watch(staffDailyAchievementFamily(_selectedDate));
+    final dailyStats = ref.watch(staffDailyOrderStatsFamily(_selectedDate));
+    final monthlyStats = ref.watch(staffMonthlyOrderStatsFamily(_selectedMonth));
 
-    final now = DateTime.now();
-    final dateStr = DateFormat('dd MMM yyyy').format(now);
-    final monthStr = DateFormat('MMMM yyyy').format(now);
+    final dateStr = DateFormat('dd MMM yyyy').format(_selectedDate);
+    final monthStr = DateFormat('MMMM yyyy').format(_selectedMonth);
 
     return monthlyTargetAsync.when(
       data: (monthlyTarget) {
@@ -153,14 +252,16 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
               // ☀️ DAILY PERFORMANCE CONTENT
               _buildHeader(
                 isDark: isDark,
-                badgeText: 'TODAY\'S ANALYTICS',
+                badgeText: 'ANALYTICS FOR $dateStr',
                 title: 'Daily Performance ($dateStr)',
                 icon: Icons.today_rounded,
+                onChangePeriod: () => _pickDate(context),
                 onExportPdf: () => _exportPdf(
                   isDaily: true,
                   target: dailyTarget,
                   achieved: dailyAchievement,
                   periodTitle: 'Daily Performance Report ($dateStr)',
+                  targetDate: _selectedDate,
                 ),
               ),
               const SizedBox(height: 16),
@@ -183,6 +284,7 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
                   target: dailyTarget,
                   achieved: dailyAchievement,
                   periodTitle: 'Daily Performance Report ($dateStr)',
+                  targetDate: _selectedDate,
                 ),
               ),
             ] else ...[
@@ -192,11 +294,13 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
                 badgeText: monthStr.toUpperCase(),
                 title: 'Monthly Sales Performance',
                 icon: Icons.analytics_rounded,
+                onChangePeriod: () => _pickMonth(context),
                 onExportPdf: () => _exportPdf(
                   isDaily: false,
                   target: monthlyTarget,
                   achieved: monthlyAchievement,
                   periodTitle: 'Monthly Sales Performance Report ($monthStr)',
+                  targetDate: _selectedMonth,
                 ),
               ),
               const SizedBox(height: 16),
@@ -219,6 +323,7 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
                   target: monthlyTarget,
                   achieved: monthlyAchievement,
                   periodTitle: 'Monthly Sales Performance Report ($monthStr)',
+                  targetDate: _selectedMonth,
                 ),
               ),
               if (monthlyTarget == 0) ...[
@@ -241,6 +346,7 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
     required String title,
     required IconData icon,
     required VoidCallback onExportPdf,
+    VoidCallback? onChangePeriod,
   }) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
@@ -258,32 +364,62 @@ class _PerformanceTabState extends ConsumerState<PerformanceTab> {
           Icon(icon, color: AppColors.primary, size: 24),
           const SizedBox(width: 10),
           Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  badgeText,
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 10,
-                    fontWeight: FontWeight.w800,
-                    color: AppColors.primary,
-                    letterSpacing: 1.2,
+            child: InkWell(
+              onTap: onChangePeriod,
+              borderRadius: BorderRadius.circular(8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        badgeText,
+                        style: GoogleFonts.plusJakartaSans(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w800,
+                          color: AppColors.primary,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                      if (onChangePeriod != null) ...[
+                        const SizedBox(width: 4),
+                        const Icon(Icons.arrow_drop_down_rounded, color: AppColors.primary, size: 18),
+                      ],
+                    ],
                   ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  title,
-                  style: GoogleFonts.plusJakartaSans(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w600,
-                    color: isDark ? Colors.white70 : AppColors.textPrimary,
+                  const SizedBox(height: 2),
+                  Text(
+                    title,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                      color: isDark ? Colors.white70 : AppColors.textPrimary,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ],
+                ],
+              ),
             ),
           ),
           const SizedBox(width: 8),
+          if (onChangePeriod != null) ...[
+            GestureDetector(
+              onTap: onChangePeriod,
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                margin: const EdgeInsets.only(right: 6),
+                decoration: BoxDecoration(
+                  color: AppColors.accent.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(
+                    color: AppColors.accent.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: const Icon(Icons.calendar_month_rounded, color: AppColors.accent, size: 16),
+              ),
+            ),
+          ],
           GestureDetector(
             onTap: onExportPdf,
             child: Container(

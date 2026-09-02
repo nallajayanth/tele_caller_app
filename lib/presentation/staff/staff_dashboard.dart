@@ -26,6 +26,79 @@ class StaffDashboard extends ConsumerStatefulWidget {
 class _StaffDashboardState extends ConsumerState<StaffDashboard> {
   int _currentIndex = 0;
   Timer? _permissionTimer;
+  bool _isCheckingTarget = false;
+
+  Future<void> _handleCheckTarget() async {
+    if (_isCheckingTarget) return;
+    setState(() => _isCheckingTarget = true);
+    HapticFeedback.lightImpact();
+
+    try {
+      ref.invalidate(staffMonthlyTargetFamily);
+      ref.invalidate(staffMonthlyTargetProvider);
+
+      final freshTarget = await ref.refresh(staffMonthlyTargetProvider.future);
+
+      if (!mounted) return;
+
+      if (freshTarget > 0) {
+        HapticFeedback.heavyImpact();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.check_circle_rounded, color: Colors.white),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Target found (₹$freshTarget)! Unlocking console...',
+                    style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: AppColors.success,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      } else {
+        HapticFeedback.vibrate();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.warning_amber_rounded, color: Colors.white),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Monthly target is not set yet. Please ask your Admin to set target in Admin Console.',
+                    style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: AppColors.warning,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Error checking target: $e'),
+            backgroundColor: AppColors.error,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isCheckingTarget = false);
+      }
+    }
+  }
 
   @override
   void initState() {
@@ -186,17 +259,16 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
     
 
 
-    // Check Operational Lock: on the 1st of the month, target must be set.
+    // Operational Lock: console is locked whenever monthly target is not set by Admin (target <= 0.0)
     final targetAsync = ref.watch(staffMonthlyTargetProvider);
-    final isFirstOfMonth = DateTime.now().day == 1;
 
-    if (isFirstOfMonth) {
-      return targetAsync.when(
-        data: (target) {
-          if (target <= 0.0) {
-            return Scaffold(
-              body: Container(
-                decoration: const BoxDecoration(gradient: AppColors.roleSelectorGradient),
+    return targetAsync.when(
+      data: (target) {
+        if (target <= 0.0) {
+          return Scaffold(
+            body: Container(
+              decoration: const BoxDecoration(gradient: AppColors.roleSelectorGradient),
+              child: SafeArea(
                 child: Center(
                   child: Padding(
                     padding: const EdgeInsets.all(28.0),
@@ -206,7 +278,7 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
                         Container(
                           padding: const EdgeInsets.all(20),
                           decoration: BoxDecoration(
-                            color: AppColors.error.withValues(alpha: 0.1),
+                            color: AppColors.error.withValues(alpha: 0.15),
                             shape: BoxShape.circle,
                             border: Border.all(color: AppColors.error, width: 2),
                           ),
@@ -228,7 +300,7 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          'The staff console is locked because your monthly target has not been set by the Admin. Under company policy, the console is locked on the 1st of the month until targets are set.',
+                          'Your monthly target has not been set by the Admin yet. Under company policy, the staff console remains locked and non-functional until your Admin sets your target.',
                           textAlign: TextAlign.center,
                           style: GoogleFonts.plusJakartaSans(
                             fontSize: 14,
@@ -237,33 +309,64 @@ class _StaffDashboardState extends ConsumerState<StaffDashboard> {
                           ),
                         ),
                         const SizedBox(height: 32),
-                        ElevatedButton.icon(
-                          onPressed: () => _confirmSignOut(context, ref),
-                          icon: const Icon(Icons.logout_rounded, size: 16),
-                          label: const Text('Sign Out'),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: Colors.white12,
-                            foregroundColor: Colors.white,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                          ),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: _isCheckingTarget ? null : _handleCheckTarget,
+                              icon: _isCheckingTarget
+                                  ? const SizedBox(
+                                      width: 14,
+                                      height: 14,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : const Icon(Icons.refresh_rounded, size: 16),
+                              label: Text(
+                                _isCheckingTarget ? 'Checking...' : 'Check Target',
+                                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                              ),
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor: Colors.white,
+                                side: const BorderSide(color: Colors.white38),
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            ElevatedButton.icon(
+                              onPressed: () => _confirmSignOut(context, ref),
+                              icon: const Icon(Icons.logout_rounded, size: 16),
+                              label: Text(
+                                'Sign Out',
+                                style: GoogleFonts.plusJakartaSans(fontWeight: FontWeight.w600),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: AppColors.error,
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                            ),
+                          ],
                         ),
                       ],
                     ),
                   ),
                 ),
               ),
-            );
-          }
-          return _buildScaffold(isDark);
-        },
-        loading: () => const Scaffold(
-          body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
-        ),
-        error: (e, _) => _buildScaffold(isDark), // bypass on network or db error to not block work
-      );
-    }
-    
-    return _buildScaffold(isDark);
+            ),
+          );
+        }
+        return _buildScaffold(isDark);
+      },
+      loading: () => const Scaffold(
+        body: Center(child: CircularProgressIndicator(color: AppColors.primary)),
+      ),
+      error: (e, _) => _buildScaffold(isDark),
+    );
   }
 
   Widget _buildScaffold(bool isDark) {

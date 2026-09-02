@@ -8,6 +8,7 @@ import '../data/models/order_model.dart';
 import '../data/models/telecaller_model.dart';
 import '../core/services/fcm_service.dart';
 import 'auth_providers.dart';
+import 'call_log_providers.dart';
 
 class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
   final Ref _ref;
@@ -241,155 +242,310 @@ class OrderPipelineStats {
 
 final globalOrderStatsProvider = Provider<OrderPipelineStats>((ref) {
   final ordersAsync = ref.watch(ordersProvider);
-  return ordersAsync.maybeWhen(
-    data: (orders) {
-      final now = DateTime.now();
-      int newOrders = 0;
-      int pending = 0;
-      int packed = 0;
-      int dispatched = 0;
-      int exceeded = 0;
+  final logsAsync = ref.watch(callLogsProvider);
+  final now = DateTime.now();
 
-      for (final o in orders) {
-        final isCreatedToday = o.createdAt.year == now.year && o.createdAt.month == now.month && o.createdAt.day == now.day;
-        final isUpdatedToday = o.updatedAt.year == now.year && o.updatedAt.month == now.month && o.updatedAt.day == now.day;
-        final status = o.status.toLowerCase();
+  int newOrders = 0;
+  int pending = 0;
+  int packed = 0;
+  int dispatched = 0;
+  int exceeded = 0;
 
-        if (status == 'received' && isCreatedToday) {
-          newOrders++;
-        }
-        if (status == 'packed') {
-          pending++; // Packed and waiting
-        }
-        if ((status == 'packed' || status == 'dispatched') && isUpdatedToday) {
-          packed++; // Packed today
-        }
-        if (status == 'dispatched' && isUpdatedToday) {
-          dispatched++; // Dispatched today
-        }
-        if (status == 'received' && now.difference(o.createdAt).inHours >= 24) {
-          exceeded++; // Exceeded 24h & unpacked
-        }
-      }
+  final orders = ordersAsync.value ?? [];
+  final logs = (logsAsync.value ?? []).where((l) => l.connectedStatus != '__system_config__').toList();
 
-      return OrderPipelineStats(
-        newOrdersCount: newOrders,
-        pendingDispatch: pending,
-        packedCount: packed,
-        dispatchedCount: dispatched,
-        exceeded24h: exceeded,
-      );
-    },
-    orElse: () => const OrderPipelineStats(
-      newOrdersCount: 0,
-      pendingDispatch: 0,
-      packedCount: 0,
-      dispatchedCount: 0,
-      exceeded24h: 0,
-    ),
+  final Set<String> todayOrderLogIds = {};
+
+  for (final l in logs) {
+    final logDateLocal = l.date.toLocal();
+    final isCreatedToday = logDateLocal.year == now.year &&
+        logDateLocal.month == now.month &&
+        logDateLocal.day == now.day;
+
+    final isOrderLog = l.connectedStatus.toLowerCase() == 'order received' ||
+        (l.orderStatus ?? '').toLowerCase() == 'received' ||
+        (l.orderValue > 0 && l.connectedStatus.toLowerCase() == 'connected');
+
+    if (isCreatedToday && isOrderLog) {
+      todayOrderLogIds.add(l.id);
+    }
+  }
+
+  for (final o in orders) {
+    final createdAtLocal = o.createdAt.toLocal();
+    final isCreatedToday = createdAtLocal.year == now.year &&
+        createdAtLocal.month == now.month &&
+        createdAtLocal.day == now.day;
+
+    if (isCreatedToday) {
+      if (o.callLogId.isNotEmpty) todayOrderLogIds.add(o.callLogId);
+      todayOrderLogIds.add(o.id);
+    }
+  }
+
+  newOrders = todayOrderLogIds.length;
+
+  for (final o in orders) {
+    final createdAtLocal = o.createdAt.toLocal();
+    final updatedAtLocal = o.updatedAt.toLocal();
+
+    final isUpdatedToday = updatedAtLocal.year == now.year &&
+        updatedAtLocal.month == now.month &&
+        updatedAtLocal.day == now.day;
+
+    final status = o.status.toLowerCase().trim();
+    final isPacked = status == 'packed';
+    final isDispatched = status == 'dispatched';
+    final isReceived = status == 'received' ||
+        status == 'order received' ||
+        status == 'order_received' ||
+        status == 'new';
+
+    if (isPacked) {
+      pending++;
+    }
+    if ((isPacked || isDispatched) && isUpdatedToday) {
+      packed++;
+    }
+    if (isDispatched && isUpdatedToday) {
+      dispatched++;
+    }
+    if (isReceived && now.difference(createdAtLocal).inHours >= 24) {
+      exceeded++;
+    }
+  }
+
+  return OrderPipelineStats(
+    newOrdersCount: newOrders,
+    pendingDispatch: pending,
+    packedCount: packed,
+    dispatchedCount: dispatched,
+    exceeded24h: exceeded,
   );
 });
 
 final staffOrderStatsProvider = Provider<OrderPipelineStats>((ref) {
   final ordersAsync = ref.watch(ordersProvider);
+  final logsAsync = ref.watch(staffLogsProvider);
   final deviceId = ref.watch(deviceIdProvider);
-  return ordersAsync.maybeWhen(
-    data: (orders) {
-      final now = DateTime.now();
-      int newOrders = 0;
-      int pending = 0;
-      int packed = 0;
-      int dispatched = 0;
-      int exceeded = 0;
+  final now = DateTime.now();
 
-      final myOrders = orders.where((o) => o.assignedStaffDeviceId == deviceId);
+  int newOrders = 0;
+  int pending = 0;
+  int packed = 0;
+  int dispatched = 0;
+  int exceeded = 0;
 
-      for (final o in myOrders) {
-        final isCreatedToday = o.createdAt.year == now.year && o.createdAt.month == now.month && o.createdAt.day == now.day;
-        final isUpdatedToday = o.updatedAt.year == now.year && o.updatedAt.month == now.month && o.updatedAt.day == now.day;
-        final status = o.status.toLowerCase();
+  final orders = ordersAsync.value ?? [];
+  final myOrders = orders.where((o) => o.assignedStaffDeviceId == deviceId);
+  final logs = (logsAsync.value ?? []).where((l) => l.connectedStatus != '__system_config__').toList();
 
-        if (status == 'received' && isCreatedToday) {
-          newOrders++;
-        }
-        if (status == 'packed') {
-          pending++;
-        }
-        if ((status == 'packed' || status == 'dispatched') && isUpdatedToday) {
-          packed++;
-        }
-        if (status == 'dispatched' && isUpdatedToday) {
-          dispatched++;
-        }
-        if (status == 'received' && now.difference(o.createdAt).inHours >= 24) {
-          exceeded++;
-        }
-      }
+  final Set<String> todayOrderLogIds = {};
 
-      return OrderPipelineStats(
-        newOrdersCount: newOrders,
-        pendingDispatch: pending,
-        packedCount: packed,
-        dispatchedCount: dispatched,
-        exceeded24h: exceeded,
-      );
-    },
-    orElse: () => const OrderPipelineStats(
-      newOrdersCount: 0,
-      pendingDispatch: 0,
-      packedCount: 0,
-      dispatchedCount: 0,
-      exceeded24h: 0,
-    ),
+  for (final l in logs) {
+    final logDateLocal = l.date.toLocal();
+    final isCreatedToday = logDateLocal.year == now.year &&
+        logDateLocal.month == now.month &&
+        logDateLocal.day == now.day;
+
+    final isOrderLog = l.connectedStatus.toLowerCase() == 'order received' ||
+        (l.orderStatus ?? '').toLowerCase() == 'received' ||
+        (l.orderValue > 0 && l.connectedStatus.toLowerCase() == 'connected');
+
+    if (isCreatedToday && isOrderLog) {
+      todayOrderLogIds.add(l.id);
+    }
+  }
+
+  for (final o in myOrders) {
+    final createdAtLocal = o.createdAt.toLocal();
+    final isCreatedToday = createdAtLocal.year == now.year &&
+        createdAtLocal.month == now.month &&
+        createdAtLocal.day == now.day;
+
+    if (isCreatedToday) {
+      if (o.callLogId.isNotEmpty) todayOrderLogIds.add(o.callLogId);
+      todayOrderLogIds.add(o.id);
+    }
+
+    final updatedAtLocal = o.updatedAt.toLocal();
+    final isUpdatedToday = updatedAtLocal.year == now.year &&
+        updatedAtLocal.month == now.month &&
+        updatedAtLocal.day == now.day;
+
+    final status = o.status.toLowerCase().trim();
+    final isPacked = status == 'packed';
+    final isDispatched = status == 'dispatched';
+    final isReceived = status == 'received' ||
+        status == 'order received' ||
+        status == 'order_received' ||
+        status == 'new';
+
+    if (isPacked) {
+      pending++;
+    }
+    if ((isPacked || isDispatched) && isUpdatedToday) {
+      packed++;
+    }
+    if (isDispatched && isUpdatedToday) {
+      dispatched++;
+    }
+    if (isReceived && now.difference(createdAtLocal).inHours >= 24) {
+      exceeded++;
+    }
+  }
+
+  newOrders = todayOrderLogIds.length;
+
+  return OrderPipelineStats(
+    newOrdersCount: newOrders,
+    pendingDispatch: pending,
+    packedCount: packed,
+    dispatchedCount: dispatched,
+    exceeded24h: exceeded,
+  );
+});
+
+final staffMonthlyOrderStatsFamily = Provider.family<OrderPipelineStats, DateTime>((ref, targetDate) {
+  final ordersAsync = ref.watch(ordersProvider);
+  final logsAsync = ref.watch(staffLogsProvider);
+  final deviceId = ref.watch(deviceIdProvider);
+
+  int newOrders = 0;
+  int pending = 0;
+  int packed = 0;
+  int dispatched = 0;
+
+  final orders = ordersAsync.value ?? [];
+  final myOrders = orders.where((o) => o.assignedStaffDeviceId == deviceId);
+  final logs = (logsAsync.value ?? []).where((l) => l.connectedStatus != '__system_config__').toList();
+
+  final Set<String> monthOrderLogIds = {};
+
+  for (final l in logs) {
+    final logDateLocal = l.date.toLocal();
+    final isCreatedInMonth = logDateLocal.year == targetDate.year && logDateLocal.month == targetDate.month;
+
+    final isOrderLog = l.connectedStatus.toLowerCase() == 'order received' ||
+        (l.orderStatus ?? '').toLowerCase() == 'received' ||
+        (l.orderValue > 0 && l.connectedStatus.toLowerCase() == 'connected');
+
+    if (isCreatedInMonth && isOrderLog) {
+      monthOrderLogIds.add(l.id);
+    }
+  }
+
+  for (final o in myOrders) {
+    final createdAtLocal = o.createdAt.toLocal();
+    final isCreatedInMonth = createdAtLocal.year == targetDate.year && createdAtLocal.month == targetDate.month;
+
+    if (isCreatedInMonth) {
+      if (o.callLogId.isNotEmpty) monthOrderLogIds.add(o.callLogId);
+      monthOrderLogIds.add(o.id);
+    }
+
+    final updatedAtLocal = o.updatedAt.toLocal();
+    final isUpdatedInMonth = updatedAtLocal.year == targetDate.year && updatedAtLocal.month == targetDate.month;
+
+    final status = o.status.toLowerCase().trim();
+    final isPacked = status == 'packed';
+    final isDispatched = status == 'dispatched';
+
+    if (isPacked) {
+      pending++;
+    }
+    if ((isPacked || isDispatched) && isUpdatedInMonth) {
+      packed++;
+    }
+    if (isDispatched && isUpdatedInMonth) {
+      dispatched++;
+    }
+  }
+
+  newOrders = monthOrderLogIds.length;
+
+  return OrderPipelineStats(
+    newOrdersCount: newOrders,
+    pendingDispatch: pending,
+    packedCount: packed,
+    dispatchedCount: dispatched,
+    exceeded24h: 0,
   );
 });
 
 final staffMonthlyOrderStatsProvider = Provider<OrderPipelineStats>((ref) {
+  return ref.watch(staffMonthlyOrderStatsFamily(DateTime.now()));
+});
+
+final staffDailyOrderStatsFamily = Provider.family<OrderPipelineStats, DateTime>((ref, targetDate) {
   final ordersAsync = ref.watch(ordersProvider);
+  final logsAsync = ref.watch(staffLogsProvider);
   final deviceId = ref.watch(deviceIdProvider);
-  return ordersAsync.maybeWhen(
-    data: (orders) {
-      final now = DateTime.now();
-      int newOrders = 0;
-      int pending = 0;
-      int packed = 0;
-      int dispatched = 0;
 
-      final myOrders = orders.where((o) => o.assignedStaffDeviceId == deviceId);
+  int newOrders = 0;
+  int pending = 0;
+  int packed = 0;
+  int dispatched = 0;
 
-      for (final o in myOrders) {
-        final isCreatedThisMonth = o.createdAt.year == now.year && o.createdAt.month == now.month;
-        final isUpdatedThisMonth = o.updatedAt.year == now.year && o.updatedAt.month == now.month;
-        final status = o.status.toLowerCase();
+  final orders = ordersAsync.value ?? [];
+  final myOrders = orders.where((o) => o.assignedStaffDeviceId == deviceId);
+  final logs = (logsAsync.value ?? []).where((l) => l.connectedStatus != '__system_config__').toList();
 
-        if (status == 'received' && isCreatedThisMonth) {
-          newOrders++;
-        }
-        if (status == 'packed') {
-          pending++;
-        }
-        if ((status == 'packed' || status == 'dispatched') && isUpdatedThisMonth) {
-          packed++;
-        }
-        if (status == 'dispatched' && isUpdatedThisMonth) {
-          dispatched++;
-        }
-      }
+  final Set<String> dayOrderLogIds = {};
 
-      return OrderPipelineStats(
-        newOrdersCount: newOrders,
-        pendingDispatch: pending,
-        packedCount: packed,
-        dispatchedCount: dispatched,
-        exceeded24h: 0,
-      );
-    },
-    orElse: () => const OrderPipelineStats(
-      newOrdersCount: 0,
-      pendingDispatch: 0,
-      packedCount: 0,
-      dispatchedCount: 0,
-      exceeded24h: 0,
-    ),
+  for (final l in logs) {
+    final logDateLocal = l.date.toLocal();
+    final isCreatedOnDay = logDateLocal.year == targetDate.year &&
+        logDateLocal.month == targetDate.month &&
+        logDateLocal.day == targetDate.day;
+
+    final isOrderLog = l.connectedStatus.toLowerCase() == 'order received' ||
+        (l.orderStatus ?? '').toLowerCase() == 'received' ||
+        (l.orderValue > 0 && l.connectedStatus.toLowerCase() == 'connected');
+
+    if (isCreatedOnDay && isOrderLog) {
+      dayOrderLogIds.add(l.id);
+    }
+  }
+
+  for (final o in myOrders) {
+    final createdAtLocal = o.createdAt.toLocal();
+    final isCreatedOnDay = createdAtLocal.year == targetDate.year &&
+        createdAtLocal.month == targetDate.month &&
+        createdAtLocal.day == targetDate.day;
+
+    if (isCreatedOnDay) {
+      if (o.callLogId.isNotEmpty) dayOrderLogIds.add(o.callLogId);
+      dayOrderLogIds.add(o.id);
+    }
+
+    final updatedAtLocal = o.updatedAt.toLocal();
+    final isUpdatedOnDay = updatedAtLocal.year == targetDate.year &&
+        updatedAtLocal.month == targetDate.month &&
+        updatedAtLocal.day == targetDate.day;
+
+    final status = o.status.toLowerCase().trim();
+    final isPacked = status == 'packed';
+    final isDispatched = status == 'dispatched';
+
+    if (isPacked) {
+      pending++;
+    }
+    if ((isPacked || isDispatched) && isUpdatedOnDay) {
+      packed++;
+    }
+    if (isDispatched && isUpdatedOnDay) {
+      dispatched++;
+    }
+  }
+
+  newOrders = dayOrderLogIds.length;
+
+  return OrderPipelineStats(
+    newOrdersCount: newOrders,
+    pendingDispatch: pending,
+    packedCount: packed,
+    dispatchedCount: dispatched,
+    exceeded24h: 0,
   );
 });

@@ -164,7 +164,8 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
   Future<bool> addLog(CallLogModel log) async {
     try {
       await _repository.addLog(log);
-      if (log.product.isNotEmpty) {
+      final isOrder = log.connectedStatus == 'Order Received' || log.orderValue > 0 || log.product.isNotEmpty;
+      if (isOrder) {
         await FirebaseFirestore.instance.collection('orders').doc(log.id).set({
           'id': log.id,
           'call_log_id': log.id,
@@ -175,11 +176,13 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
           'assigned_staff_device_id': log.deviceId,
           'created_at': DateTime.now().toIso8601String(),
           'updated_at': DateTime.now().toIso8601String(),
-        });
+        }, SetOptions(merge: true));
 
-        // Decrement stock for the new order
-        await StockService.adjustStockForNewOrder(log.product);
-        _ref.invalidate(productsProvider);
+        if (log.product.isNotEmpty) {
+          // Decrement stock for the new order
+          await StockService.adjustStockForNewOrder(log.product);
+          _ref.invalidate(productsProvider);
+        }
 
         // Notify Admins about the new order
         FCMService.instance.notifyAdminsOfNewOrder(
@@ -535,9 +538,8 @@ final orderDetailProvider = Provider.family<OrderModel?, String>((ref, callLogId
   );
 });
 
-final staffMonthlyTargetProvider = FutureProvider<double>((ref) async {
+final staffMonthlyTargetFamily = FutureProvider.family<double, DateTime>((ref, targetDate) async {
   try {
-    final now = DateTime.now();
     final currentDeviceId = ref.watch(deviceIdProvider);
     final activeUser = ref.watch(activeUserProvider);
     final userPhone = activeUser?.phoneNumber ?? '';
@@ -547,8 +549,8 @@ final staffMonthlyTargetProvider = FutureProvider<double>((ref) async {
 
     final snapshot = await FirebaseFirestore.instance
         .collection('monthly_targets')
-        .where('month', isEqualTo: now.month)
-        .where('year', isEqualTo: now.year)
+        .where('month', isEqualTo: targetDate.month)
+        .where('year', isEqualTo: targetDate.year)
         .get();
 
     if (snapshot.docs.isEmpty) return 0.0;
@@ -571,16 +573,39 @@ final staffMonthlyTargetProvider = FutureProvider<double>((ref) async {
   }
 });
 
-final staffMonthlyAchievementProvider = Provider<double>((ref) {
+final staffMonthlyTargetProvider = FutureProvider<double>((ref) {
+  return ref.watch(staffMonthlyTargetFamily(DateTime.now()).future);
+});
+
+final staffMonthlyAchievementFamily = Provider.family<double, DateTime>((ref, targetDate) {
   final logsAsync = ref.watch(staffLogsProvider);
   return logsAsync.when(
     data: (logs) {
-      final now = DateTime.now();
-      final currentMonthLogs = logs.where((l) =>
-          l.date.year == now.year &&
-          l.date.month == now.month &&
+      final monthLogs = logs.where((l) =>
+          l.date.year == targetDate.year &&
+          l.date.month == targetDate.month &&
           (l.orderValue > 0 || l.connectedStatus == 'Order Received'));
-      return currentMonthLogs.fold<double>(0.0, (total, l) => total + l.orderValue);
+      return monthLogs.fold<double>(0.0, (total, l) => total + l.orderValue);
+    },
+    loading: () => 0.0,
+    error: (_, st) => 0.0,
+  );
+});
+
+final staffMonthlyAchievementProvider = Provider<double>((ref) {
+  return ref.watch(staffMonthlyAchievementFamily(DateTime.now()));
+});
+
+final staffDailyAchievementFamily = Provider.family<double, DateTime>((ref, targetDate) {
+  final logsAsync = ref.watch(staffLogsProvider);
+  return logsAsync.when(
+    data: (logs) {
+      final dayLogs = logs.where((l) =>
+          l.date.year == targetDate.year &&
+          l.date.month == targetDate.month &&
+          l.date.day == targetDate.day &&
+          (l.orderValue > 0 || l.connectedStatus == 'Order Received'));
+      return dayLogs.fold<double>(0.0, (total, l) => total + l.orderValue);
     },
     loading: () => 0.0,
     error: (_, st) => 0.0,
@@ -588,32 +613,22 @@ final staffMonthlyAchievementProvider = Provider<double>((ref) {
 });
 
 final staffDailyAchievementProvider = Provider<double>((ref) {
-  final logsAsync = ref.watch(staffLogsProvider);
-  return logsAsync.when(
-    data: (logs) {
-      final now = DateTime.now();
-      final todayLogs = logs.where((l) =>
-          l.date.year == now.year &&
-          l.date.month == now.month &&
-          l.date.day == now.day &&
-          (l.orderValue > 0 || l.connectedStatus == 'Order Received'));
-      return todayLogs.fold<double>(0.0, (total, l) => total + l.orderValue);
-    },
-    loading: () => 0.0,
-    error: (_, st) => 0.0,
-  );
+  return ref.watch(staffDailyAchievementFamily(DateTime.now()));
 });
 
-final staffDailyTargetProvider = Provider<double>((ref) {
-  final targetAsync = ref.watch(staffMonthlyTargetProvider);
+final staffDailyTargetFamily = Provider.family<double, DateTime>((ref, targetDate) {
+  final targetAsync = ref.watch(staffMonthlyTargetFamily(targetDate));
   return targetAsync.maybeWhen(
     data: (target) {
       if (target <= 0) return 0.0;
-      final now = DateTime.now();
-      final daysInMonth = DateTime(now.year, now.month + 1, 0).day;
+      final daysInMonth = DateTime(targetDate.year, targetDate.month + 1, 0).day;
       final workingDays = daysInMonth > 26 ? 26 : daysInMonth;
       return target / workingDays;
     },
     orElse: () => 0.0,
   );
+});
+
+final staffDailyTargetProvider = Provider<double>((ref) {
+  return ref.watch(staffDailyTargetFamily(DateTime.now()));
 });
