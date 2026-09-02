@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_storage/firebase_storage.dart';
 import '../data/models/order_model.dart';
+import '../data/models/telecaller_model.dart';
 import '../core/services/fcm_service.dart';
 import 'auth_providers.dart';
 
@@ -16,10 +17,17 @@ class OrderNotifier extends StateNotifier<AsyncValue<List<OrderModel>>> {
   OrderNotifier(this._ref) : super(const AsyncLoading()) {
     loadOrders();
     _subscribeRealtime();
+    _ref.listen<TelecallerModel?>(activeUserProvider, (previous, next) {
+      if (previous?.role != next?.role || previous?.phoneNumber != next?.phoneNumber) {
+        _subscribeRealtime();
+        loadOrders();
+      }
+    });
   }
 
   void _subscribeRealtime() {
     try {
+      _subscription?.cancel();
       final activeUser = _ref.read(activeUserProvider);
       final role = activeUser?.role;
       final deviceId = _ref.read(deviceIdProvider);

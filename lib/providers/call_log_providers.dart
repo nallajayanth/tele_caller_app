@@ -7,6 +7,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../data/datasources/firestore_datasource.dart';
 import '../data/models/call_log_model.dart';
 import '../data/models/order_model.dart';
+import '../data/models/telecaller_model.dart';
 import '../data/repositories/call_log_repository_impl.dart';
 import '../domain/repositories/call_log_repository.dart';
 import '../core/services/fcm_service.dart';
@@ -57,10 +58,17 @@ class CallLogNotifier extends StateNotifier<AsyncValue<List<CallLogModel>>> {
   CallLogNotifier(this._repository, this._ref) : super(const AsyncLoading()) {
     loadLogs();
     _subscribeRealtime();
+    _ref.listen<TelecallerModel?>(activeUserProvider, (previous, next) {
+      if (previous?.role != next?.role || previous?.phoneNumber != next?.phoneNumber) {
+        _subscribeRealtime();
+        loadLogs();
+      }
+    });
   }
 
   void _subscribeRealtime() {
     try {
+      _subscription?.cancel();
       final activeUser = _ref.read(activeUserProvider);
       final role = activeUser?.role;
       final currentDeviceId = _ref.read(deviceIdProvider);

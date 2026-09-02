@@ -8,6 +8,7 @@ import '../../core/constants/app_colors.dart';
 import '../../core/constants/app_spacing.dart';
 import '../../providers/auth_providers.dart';
 import '../../providers/call_log_providers.dart';
+import '../../providers/order_providers.dart';
 import '../common/widgets/premium_button.dart';
 
 class LoginScreen extends ConsumerStatefulWidget {
@@ -83,11 +84,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         return;
       }
 
-      // Step 2: Populate Call Logs
-      await ref.read(callLogsProvider.notifier).loadLogs();
-
-      // Step 3: Now set user session (navigates to dashboard)
+      // Step 2: Set user session first so activeUserProvider holds the logged-in user & role
       await ref.read(activeUserProvider.notifier).setUserSession(user);
+
+      // Step 3: Populate Call Logs and Orders under the active user session
+      await ref.read(callLogsProvider.notifier).loadLogs();
+      await ref.read(ordersProvider.notifier).loadOrders();
 
       HapticFeedback.heavyImpact();
     } catch (e) {

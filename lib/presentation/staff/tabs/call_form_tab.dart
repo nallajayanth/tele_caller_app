@@ -589,7 +589,12 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
         ? ''
         : jsonEncode(
             _selectedProducts.entries
-                .map((e) => {'name': e.key, 'qty': e.value.qty, 'price': e.value.price})
+                .map((e) => {
+                      if (e.value.id != null && e.value.id!.isNotEmpty) 'id': e.value.id,
+                      'name': e.key,
+                      'qty': e.value.qty,
+                      'price': e.value.price,
+                    })
                 .toList(),
           );
 
@@ -1399,11 +1404,12 @@ class _CallFormTabState extends ConsumerState<CallFormTab> {
 // ─── Product Selection Model ─────────────────────────────────────────────────
 
 class _ProductSelection {
+  final String? id;
   final int qty;
   final double price;
-  const _ProductSelection({required this.qty, required this.price});
-  _ProductSelection copyWith({int? qty, double? price}) =>
-      _ProductSelection(qty: qty ?? this.qty, price: price ?? this.price);
+  const _ProductSelection({this.id, required this.qty, required this.price});
+  _ProductSelection copyWith({String? id, int? qty, double? price}) =>
+      _ProductSelection(id: id ?? this.id, qty: qty ?? this.qty, price: price ?? this.price);
 }
 
 // ─── Product Picker Modal ────────────────────────────────────────────────────
@@ -1487,7 +1493,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
         _qtyCtrls[product.name]?.clear();
       } else {
         final price = double.tryParse(priceCtrl.text) ?? 0;
-        _selections[product.name] = _ProductSelection(qty: newQty, price: price);
+        _selections[product.name] = _ProductSelection(id: product.id, qty: newQty, price: price);
         final qCtrl = _qtyCtrlFor(product.name, newQty);
         final newText = '$newQty';
         if (qCtrl.text != newText) {
@@ -1503,7 +1509,7 @@ class _ProductPickerSheetState extends ConsumerState<_ProductPickerSheet> {
     setState(() {
       final sel = _selections[product.name];
       final price = sel?.price ?? (double.tryParse(priceCtrl.text) ?? 0);
-      _selections[product.name] = _ProductSelection(qty: val, price: price);
+      _selections[product.name] = _ProductSelection(id: product.id, qty: val, price: price);
     });
   }
 

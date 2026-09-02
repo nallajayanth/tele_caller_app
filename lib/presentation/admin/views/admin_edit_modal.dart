@@ -6,6 +6,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:intl/intl.dart';
 import '../../../core/constants/app_colors.dart';
 import '../../../core/constants/app_spacing.dart';
+import '../../../core/utils/product_formatter.dart';
 import '../../../data/models/call_log_model.dart';
 import '../../../data/models/product_model.dart';
 import '../../../providers/call_log_providers.dart';
@@ -38,11 +39,10 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
   late DateTime _followUpDate;
   bool _isSaving = false;
 
-  Map<String, int> _selectedProductQuantities = {};
+  final Map<String, int> _selectedProductQuantities = {};
   final Map<String, double> _selectedProductPrices = {};
   final Map<String, TextEditingController> _priceCtrls = {};
-  String? _selectedDropdownProduct;
-  bool _showCustomProductField = false;
+  final Map<String, TextEditingController> _qtyCtrls = {};
   String _productSearchQuery = '';
 
   String _formatProductText(String product) {
@@ -81,42 +81,6 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
         _productSearchQuery = _productSearchCtrl.text;
       });
     });
-
-    bool parsedJson = false;
-    if (log.product.trim().startsWith('[') && log.product.trim().endsWith(']')) {
-      try {
-        final decoded = jsonDecode(log.product);
-        if (decoded is List) {
-          for (var item in decoded) {
-            if (item is Map) {
-              final id = item['id']?.toString() ?? '';
-              final qtyVal = item['qty'];
-              final priceVal = item['price'];
-              final qty = qtyVal is num ? qtyVal.toInt() : (int.tryParse(qtyVal?.toString() ?? '') ?? 0);
-              final price = priceVal is num ? priceVal.toDouble() : (double.tryParse(priceVal?.toString() ?? '') ?? 0.0);
-              if (id.isNotEmpty && qty > 0) {
-                _selectedProductQuantities[id] = qty;
-                _selectedProductPrices[id] = price;
-              }
-            }
-          }
-          parsedJson = true;
-        }
-      } catch (_) {}
-    }
-
-    if (log.product.isNotEmpty) {
-      if (parsedJson) {
-        _selectedDropdownProduct = '__custom__';
-        _showCustomProductField = true;
-      } else {
-        _selectedDropdownProduct = null;
-        _showCustomProductField = false;
-      }
-    } else {
-      _showCustomProductField = false;
-      _selectedDropdownProduct = null;
-    }
   }
 
   @override
@@ -130,6 +94,9 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
     _orderCtrl.dispose();
     _productSearchCtrl.dispose();
     for (final ctrl in _priceCtrls.values) {
+      ctrl.dispose();
+    }
+    for (final ctrl in _qtyCtrls.values) {
       ctrl.dispose();
     }
     super.dispose();
@@ -166,18 +133,19 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
     setState(() => _isSaving = true);
 
     String savedProductStr;
-    if (_selectedStatus == 'Order Received' && _selectedProductQuantities.isNotEmpty) {
+    if (_selectedProductQuantities.isNotEmpty) {
       final products = ref.read(productsProvider).valueOrNull ?? [];
       final List<Map<String, dynamic>> selectedItems = [];
       _selectedProductQuantities.forEach((prodId, qty) {
         final p = products.firstWhere(
-          (prod) => prod.id == prodId,
-          orElse: () => ProductModel(id: prodId, name: 'Unknown', price: 0.0, stock: 0),
+          (prod) => prod.id == prodId || prod.name.trim().toLowerCase() == prodId.trim().toLowerCase(),
+          orElse: () => ProductModel(id: prodId, name: prodId, price: 0.0, stock: 0),
         );
+        final name = (p.name != 'Unknown' && p.name.isNotEmpty) ? p.name : prodId;
         final price = _selectedProductPrices[prodId] ?? p.price;
         selectedItems.add({
           'id': p.id,
-          'name': p.name,
+          'name': name,
           'price': price,
           'qty': qty,
         });
@@ -226,22 +194,115 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
     }
   }
 
+  bool _productsInitialized = false;
+
+  void _initProductsIfNeeded(List<ProductModel> products) {
+    if (_productsInitialized) return;
+    if (products.isEmpty && widget.log.product.isNotEmpty) return;
+
+    final log = widget.log;
+    if (log.product.isEmpty) {
+      _productsInitialized = true;
+      return;
+    }
+
+    _selectedProductQuantities.clear();
+    _selectedProductPrices.clear();
+    _priceCtrls.clear();
+
+    final raw = log.product.trim();
+
+    if (raw.startsWith('[') || raw.startsWith('{')) {
+      try {
+        final decoded = jsonDecode(raw);
+        List itemsList = [];
+        if (decoded is List) {
+          itemsList = decoded;
+        } else if (decoded is Map) {
+          itemsList = [decoded];
+        }
+
+        for (var item in itemsList) {
+          if (item is Map) {
+            final idStr = item['id']?.toString().trim() ?? '';
+            final nameStr = (item['name'] ?? item['product_name'] ?? '').toString().trim();
+            final qtyVal = item['qty'] ?? item['quantity'];
+            final priceVal = item['price'];
+            final qty = qtyVal is num ? qtyVal.toInt() : (int.tryParse(qtyVal?.toString() ?? '') ?? 1);
+            final price = priceVal is num ? priceVal.toDouble() : (double.tryParse(priceVal?.toString() ?? '') ?? 0.0);
+
+            if (qty > 0) {
+              ProductModel? matchedProduct;
+              if (idStr.isNotEmpty) {
+                matchedProduct = products.where((p) => p.id == idStr).firstOrNull;
+              }
+              if (matchedProduct == null && nameStr.isNotEmpty) {
+                matchedProduct = products.where((p) => p.name.trim().toLowerCase() == nameStr.toLowerCase()).firstOrNull;
+              }
+
+              final key = matchedProduct?.id ?? (idStr.isNotEmpty ? idStr : nameStr);
+              final itemPrice = price > 0 ? price : (matchedProduct?.price ?? 0.0);
+
+              if (key.isNotEmpty) {
+                _selectedProductQuantities[key] = qty;
+                _selectedProductPrices[key] = itemPrice;
+              }
+            }
+          }
+        }
+      } catch (e) {
+        debugPrint('Error decoding product JSON in AdminEditModal: $e');
+      }
+    }
+
+    if (_selectedProductQuantities.isEmpty) {
+      final parts = raw.split(RegExp(r'[\r\n,]+'));
+      for (final part in parts) {
+        final trimmedPart = part.trim();
+        if (trimmedPart.isEmpty) continue;
+
+        final match = RegExp(r'^(.+?)\s*[×x]\s*(\d+)$', caseSensitive: false).firstMatch(trimmedPart);
+        String name = trimmedPart;
+        int qty = 1;
+        if (match != null) {
+          name = match.group(1)!.trim();
+          qty = int.tryParse(match.group(2)!) ?? 1;
+        }
+
+        final matchedProduct = products.where((p) => p.name.trim().toLowerCase() == name.toLowerCase()).firstOrNull;
+        final key = matchedProduct?.id ?? name;
+        if (key.isNotEmpty && qty > 0) {
+          _selectedProductQuantities[key] = qty;
+          _selectedProductPrices[key] = matchedProduct?.price ?? 0.0;
+        }
+      }
+    }
+
+    if (_selectedProductQuantities.isNotEmpty) {
+      double totalProductPrice = 0;
+      _selectedProductQuantities.forEach((key, qty) {
+        totalProductPrice += (_selectedProductPrices[key] ?? 0.0) * qty;
+      });
+      if (totalProductPrice == 0 && log.orderValue > 0) {
+        final totalQty = _selectedProductQuantities.values.fold<int>(0, (a, b) => a + b);
+        if (totalQty > 0) {
+          final avgPrice = log.orderValue / totalQty;
+          for (final key in _selectedProductQuantities.keys) {
+            _selectedProductPrices[key] = avgPrice;
+          }
+        }
+      }
+    }
+
+    _productsInitialized = true;
+  }
+
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final products = ref.watch(productsProvider).valueOrNull ?? [];
 
-    // Auto-resolve single product selection if not already resolved and not JSON
-    if (_selectedDropdownProduct == null && _selectedProductQuantities.isEmpty && widget.log.product.isNotEmpty) {
-      final matches = products.any((p) => p.name == widget.log.product);
-      if (matches) {
-        _selectedDropdownProduct = widget.log.product;
-        _showCustomProductField = false;
-      } else {
-        _selectedDropdownProduct = '__custom__';
-        _showCustomProductField = true;
-      }
-    }
+    _initProductsIfNeeded(products);
 
     return Padding(
       padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
@@ -360,11 +421,6 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
                       selected: _selectedStatus,
                       onChanged: (s) => setState(() {
                         _selectedStatus = s;
-                        _selectedDropdownProduct = null;
-                        _showCustomProductField = false;
-                        _selectedProductQuantities = {};
-                        _productCtrl.clear();
-                        _orderCtrl.text = '0';
                       }),
                     ),
                     const SizedBox(height: 16),
@@ -498,6 +554,13 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
     return _priceCtrls.putIfAbsent(
       prodId,
       () => TextEditingController(text: initialPrice.toStringAsFixed(0)),
+    );
+  }
+
+  TextEditingController _qtyCtrlFor(String prodId, int qty) {
+    return _qtyCtrls.putIfAbsent(
+      prodId,
+      () => TextEditingController(text: qty > 0 ? '$qty' : ''),
     );
   }
 
@@ -689,8 +752,10 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
                                                         final newQty = qty - 1;
                                                         if (newQty <= 0) {
                                                           _selectedProductQuantities.remove(p.id);
+                                                          _qtyCtrls[p.id]?.clear();
                                                         } else {
                                                           _selectedProductQuantities[p.id] = newQty;
+                                                          _qtyCtrlFor(p.id, newQty).text = '$newQty';
                                                         }
                                                         _recalculateOrderFromProducts(products);
                                                       });
@@ -698,15 +763,51 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
                                                     },
                                                   ),
                                                   Container(
-                                                    width: 36,
-                                                    alignment: Alignment.center,
-                                                    child: Text(
-                                                      '$qty',
+                                                    width: 48,
+                                                    height: 32,
+                                                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                                                    decoration: BoxDecoration(
+                                                      color: isDark ? AppColors.darkSurface : Colors.white,
+                                                      borderRadius: BorderRadius.circular(8),
+                                                      border: Border.all(
+                                                        color: AppColors.primary.withValues(alpha: 0.4),
+                                                        width: 1,
+                                                      ),
+                                                    ),
+                                                    child: TextField(
+                                                      controller: _qtyCtrlFor(p.id, qty),
+                                                      keyboardType: TextInputType.number,
+                                                      textAlign: TextAlign.center,
+                                                      inputFormatters: [
+                                                        FilteringTextInputFormatter.digitsOnly,
+                                                      ],
                                                       style: GoogleFonts.plusJakartaSans(
                                                         fontSize: 13,
                                                         fontWeight: FontWeight.w700,
                                                         color: AppColors.primary,
                                                       ),
+                                                      decoration: const InputDecoration(
+                                                        isDense: true,
+                                                        contentPadding: EdgeInsets.symmetric(vertical: 6),
+                                                        border: InputBorder.none,
+                                                        focusedBorder: InputBorder.none,
+                                                        enabledBorder: InputBorder.none,
+                                                      ),
+                                                      onChanged: (val) {
+                                                        final newQty = int.tryParse(val) ?? 0;
+                                                        setModalState(() {
+                                                          if (newQty <= 0) {
+                                                            _selectedProductQuantities.remove(p.id);
+                                                          } else {
+                                                            _selectedProductQuantities[p.id] = newQty;
+                                                            if (!_selectedProductPrices.containsKey(p.id)) {
+                                                              _selectedProductPrices[p.id] = p.price;
+                                                            }
+                                                          }
+                                                          _recalculateOrderFromProducts(products);
+                                                        });
+                                                        setState(() {});
+                                                      },
                                                     ),
                                                   ),
                                                 ],
@@ -714,10 +815,12 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
                                                   icon: Icons.add_rounded,
                                                   onTap: () {
                                                     setModalState(() {
-                                                      _selectedProductQuantities[p.id] = qty + 1;
+                                                      final newQty = qty + 1;
+                                                      _selectedProductQuantities[p.id] = newQty;
                                                       if (!_selectedProductPrices.containsKey(p.id)) {
                                                         _selectedProductPrices[p.id] = p.price;
                                                       }
+                                                      _qtyCtrlFor(p.id, newQty).text = '$newQty';
                                                       _recalculateOrderFromProducts(products);
                                                     });
                                                     setState(() {});
@@ -826,96 +929,69 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
   }
 
   Widget _buildProductSelector(BuildContext context, bool isDark, List<ProductModel> products, Color cardColor) {
-    if (_selectedStatus == 'Order Received') {
-      final selectedCount = _selectedProductQuantities.values.fold<int>(0, (sum, val) => sum + val);
+    final selectedCount = _selectedProductQuantities.values.fold<int>(0, (sum, val) => sum + val);
 
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Products & Quantities *',
-            style: GoogleFonts.plusJakartaSans(
-              fontSize: 13,
-              fontWeight: FontWeight.bold,
-              color: AppColors.primary,
-            ),
-          ),
-          const SizedBox(height: 10),
-          GestureDetector(
-            onTap: () => _showAdminProductPicker(products),
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-              decoration: BoxDecoration(
-                color: AppColors.primary.withValues(alpha: 0.06),
-                borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
-                border: Border.all(
-                  color: AppColors.primary.withValues(alpha: 0.3),
-                  width: 1.5,
-                ),
-              ),
-              child: Row(
-                children: [
-                  const Icon(Icons.search_rounded, color: AppColors.primary, size: 20),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Text(
-                      selectedCount > 0
-                          ? '$selectedCount product(s) selected (₹${_orderCtrl.text})'
-                          : 'Search & select products...',
-                      style: GoogleFonts.plusJakartaSans(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: selectedCount > 0 ? AppColors.primary : AppColors.textTertiary,
-                      ),
-                    ),
-                  ),
-                  const Icon(Icons.chevron_right_rounded, color: AppColors.primary),
-                ],
-              ),
-            ),
-          ),
-        ],
-      );
-    } else {
-      return Column(
-        children: [
-          DropdownButtonFormField<String>(
-            initialValue: _selectedDropdownProduct,
-            isExpanded: true,
-            decoration: const InputDecoration(
-              labelText: 'Select Product / Remedy *',
-              prefixIcon: Icon(Icons.science_rounded),
-            ),
-            items: [
-              ...products.map((p) => DropdownMenuItem(value: p.name, child: Text(p.name))),
-              const DropdownMenuItem(value: '__custom__', child: Text('Other / Custom...')),
-            ],
-            onChanged: (val) {
-              setState(() {
-                _selectedDropdownProduct = val;
-                if (val == '__custom__') {
-                  _showCustomProductField = true;
-                  _productCtrl.clear();
-                } else {
-                  _showCustomProductField = false;
-                  _productCtrl.text = val ?? '';
-                }
-              });
-            },
-            validator: (v) => v == null ? 'Required' : null,
-          ),
-          if (_showCustomProductField) ...[
-            const SizedBox(height: 12),
-            _EditField(
-              ctrl: _productCtrl,
-              label: 'Custom Product Name *',
-              icon: Icons.edit_note_rounded,
-              validator: (v) => v == null || v.trim().isEmpty ? 'Required' : null,
-            ),
-          ],
-        ],
-      );
+    String displayText = 'Search & select products...';
+    if (selectedCount > 0) {
+      final formattedText = ProductFormatter.format(_productCtrl.text);
+      if (_selectedStatus == 'Order Received') {
+        displayText = '$selectedCount product(s) selected (₹${_orderCtrl.text})';
+      } else {
+        displayText = formattedText.isNotEmpty ? formattedText : '$selectedCount product(s) selected';
+      }
+    } else if (_productCtrl.text.isNotEmpty) {
+      displayText = ProductFormatter.format(_productCtrl.text);
     }
+
+    final hasProducts = selectedCount > 0 || _productCtrl.text.isNotEmpty;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          _selectedStatus == 'Order Received' ? 'Products & Quantities *' : 'Products & Quantities',
+          style: GoogleFonts.plusJakartaSans(
+            fontSize: 13,
+            fontWeight: FontWeight.bold,
+            color: AppColors.primary,
+          ),
+        ),
+        const SizedBox(height: 10),
+        GestureDetector(
+          onTap: () => _showAdminProductPicker(products),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(AppSpacing.inputRadius),
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.3),
+                width: 1.5,
+              ),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.search_rounded, color: AppColors.primary, size: 20),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    displayText,
+                    style: GoogleFonts.plusJakartaSans(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: hasProducts ? AppColors.primary : AppColors.textTertiary,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                const Icon(Icons.chevron_right_rounded, color: AppColors.primary),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   void _recalculateOrderFromProducts(List<ProductModel> products) {
@@ -925,14 +1001,15 @@ class _AdminEditModalState extends ConsumerState<AdminEditModal> {
 
       _selectedProductQuantities.forEach((prodId, qty) {
         final p = products.firstWhere(
-          (prod) => prod.id == prodId,
-          orElse: () => ProductModel(id: prodId, name: 'Unknown', price: 0.0, stock: 0),
+          (prod) => prod.id == prodId || prod.name.trim().toLowerCase() == prodId.trim().toLowerCase(),
+          orElse: () => ProductModel(id: prodId, name: prodId, price: 0.0, stock: 0),
         );
+        final name = (p.name != 'Unknown' && p.name.isNotEmpty) ? p.name : prodId;
         final price = _selectedProductPrices[prodId] ?? p.price;
         total += price * qty;
         selectedItems.add({
           'id': p.id,
-          'name': p.name,
+          'name': name,
           'price': price,
           'qty': qty,
         });

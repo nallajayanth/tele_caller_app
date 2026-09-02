@@ -50,6 +50,15 @@ class _AdminTerminalState extends ConsumerState<AdminTerminal> {
   LogFilterState? _lastFilter;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(callLogsProvider.notifier).loadLogs();
+      ref.read(ordersProvider.notifier).loadOrders();
+    });
+  }
+
+  @override
   void dispose() {
     _searchCtrl.dispose();
     _scrollCtrl.dispose();
